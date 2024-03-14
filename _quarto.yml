@@ -1,0 +1,4 @@
+project:
+  output-dir: results
+  render:
+    - reports/index.qmd

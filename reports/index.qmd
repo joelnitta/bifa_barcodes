@@ -1,0 +1,11 @@
+---
+title: Reports
+bibliography: references.bib
+---
+
+```{r}
+#| label: load
+targets::tar_load(rbcl, store = here::here("_targets/"))
+```
+
+There are `r length(rbcl)` rbcL sequences.

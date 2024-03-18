@@ -2,13 +2,26 @@ check_monophy <- function(tree) {
 
 }
 
-analyze_dist <- function(dna_ss) {
-  dna_matrix <- DECIPHER::DistanceMatrix(dna_ss)
+# Convert DNA sequences in DNAbin format to DNAStringSet
+dnabin_to_dnass <- function(dnabin) {
+  temp_file <- tempfile(fileext = ".fasta")
+  ape::write.FASTA(dnabin, temp_file)
+  seq <- Biostrings::readDNAStringSet(temp_file)
+  fs::file_delete(temp_file)
+  seq
+}
 
-  diag(dna_matrix) <- NA
-  dna_matrix[upper.tri(dna_matrix)] <- NA
+analyze_dist <- function(alignment) {
 
-  dna_matrix %>%
+  dist_matrix <-
+    alignment %>%
+    dnabin_to_dnass() %>%
+    DECIPHER::DistanceMatrix()
+
+  diag(dist_matrix) <- NA
+  dist_matrix[upper.tri(dist_matrix)] <- NA
+
+  dist_matrix %>%
     as.data.frame() %>%
     rownames_to_column("acc_1") %>%
     as_tibble() %>%
@@ -111,23 +124,10 @@ iqtree <- function(alignment_path = NULL, wd = getwd(),
 
 }
 
-align_with_og <- function(fern_seqs, marker) {
-  # get outgroup sequences used by ftol
-  og_taxa <-
-    ftolr::accessions_wide %>%
-    filter(outgroup) %>%
-    pull(species)
-
-  ftol_seqs <- ftolr::ft_seqs(loci = marker, aligned = FALSE)
-
-  og_seqs <- ftol_seqs[og_taxa]
-
-  # Combine outgroup seqs and fern seqs
-  combined_seqs <- c(og_seqs, fern_seqs)
-
+align_seqs <- function(seqs) {
   # Align
   alignment <- ips::mafft(
-    x = combined_seqs,
+    x = seqs,
     options = "--adjustdirection",
     exec = system("which mafft", intern = TRUE)
   )
@@ -138,4 +138,20 @@ align_with_og <- function(fern_seqs, marker) {
   rownames(alignment) <- seq_names
 
   alignment
+
+}
+
+align_with_og <- function(fern_seqs, marker) {
+  # get outgroup sequences used by ftol
+  og_taxa <-
+    ftolr::accessions_wide %>%
+    filter(outgroup) %>%
+    pull(species)
+
+  ftol_seqs <- ftolr::ft_seqs(loci = marker, aligned = FALSE, del_gaps = TRUE)
+
+  og_seqs <- ftol_seqs[names(ftol_seqs) %in% og_taxa]
+
+  # Combine outgroup seqs and fern seqs, align
+  align_seqs(c(og_seqs, fern_seqs))
 }

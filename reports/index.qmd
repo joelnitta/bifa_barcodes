@@ -1,11 +1,31 @@
 ---
 title: Reports
-bibliography: references.bib
 ---
 
 ```{r}
 #| label: load
-targets::tar_load(rbcl, store = here::here("_targets/"))
+targets::tar_load(
+  c(
+    rbcl,
+    rbcl_dist,
+    trnlf_dist),
+  store = here::here("_targets/"))
+
+source(here::here("R/packages.R"))
 ```
 
 There are `r length(rbcl)` rbcL sequences.
+
+```{r}
+rbcl_dist %>%
+  ggplot(aes(x = dist, fill = comp_type)) +
+  geom_histogram() +
+  facet_wrap(vars(comp_type), nrow = 2, ncol = 1, scales = "free_y")
+```
+
+```{r}
+trnlf_dist %>%
+  ggplot(aes(x = dist, fill = comp_type)) +
+  geom_histogram() +
+  facet_wrap(vars(comp_type), nrow = 2, ncol = 1, scales = "free_y")
+```

@@ -141,4 +141,7 @@ WORKDIR /tmp/project
 # Restore, but don't use cache
 RUN Rscript -e 'install.packages("renv"); renv::consent(provided = TRUE); renv::settings$use.cache(FALSE); renv::init(bare = TRUE); renv::restore()'
 
+# Install packages used by VS code, but don't snapshot
+RUN Rscript -e 'pkg_ignore <- c("jsonlite", "rlang", "languageserver", "reprex", "mdlincoln/docthis"); renv::install(pkg_ignore); renv::settings$ignored.packages(pkg_ignore, persist = TRUE)'
+
 WORKDIR /home/

@@ -20,6 +20,7 @@ ARG DEBIAN_FRONTEND=noninteractive
 # libharfbuzz-dev, libfribidi-dev for R package textshaping
 # librdf0-dev for redland -> R package deposits
 # cmake -> R package nanonext
+# gdebi -> Quarto
 
 RUN apt-get update \
   && apt-get install -y --no-install-recommends \
@@ -65,6 +66,7 @@ RUN apt-get update \
     liblzma-dev \
     libbz2-dev \
     libsecret-1-0 \
+    gdebi \
   && apt-get clean
 
 ########################
@@ -119,6 +121,11 @@ RUN git clone https://github.com/camwebb/$APP_NAME.git && \
   git checkout $TAXONTOOLS_VERSION && \
 	make check && \
 	make install
+
+### quarto ###
+ARG QUARTO_VERSION="1.5.27"
+RUN curl -o quarto-linux-amd64.deb -L https://github.com/quarto-dev/quarto-cli/releases/download/v${QUARTO_VERSION}/quarto-${QUARTO_VERSION}-linux-amd64.deb
+RUN gdebi --non-interactive quarto-linux-amd64.deb
 
 ####################################
 ### Install R packages with renv ###

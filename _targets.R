@@ -3,38 +3,33 @@ source("R/functions.R")
 
 
 tar_plan(
-  # Load data ---
+  # Load sequences ---
   tar_file_read(
-    rbcl,
+    rbcl_seqs_all,
     "data_raw/BIFA_rbcL_analyses_240313.fasta",
     ape::read.FASTA(!!.x),
   ),
   tar_file_read(
-    trnlf,
+    trnlf_seqs_all,
     "data_raw/BIFA_trnLF_analyses_240315.fasta",
     ape::read.FASTA(!!.x),
   ),
+  # Drop specimens not identified to species
+  rbcl_seqs = drop_indets(rbcl_seqs_all),
+  trnlf_seqs = drop_indets(trnlf_seqs_all),
   # Align ingroup only ----
-  trnlf_fern_align = align_seqs(trnlf),
-  rbcl_fern_align = align_seqs(rbcl),
+  rbcl_fern_align = align_seqs(rbcl_seqs),
+  trnlf_fern_align = align_seqs(trnlf_seqs),
   # Analyze genetic distances ----
   rbcl_dist = analyze_dist(rbcl_fern_align),
   trnlf_dist = analyze_dist(trnlf_fern_align),
   # Add outgroups and align ----
-  rbcl_with_og = align_with_og(rbcl, marker = "rbcL"),
-  tar_file(
-    rbcl_align_file,
-    write_phy(rbcl_with_og, "_targets/user/iqtree/rbcl.phy")
-  ),
-  # TODO: can't get outgroup seqs for trnLF
-  trnlf_with_og = align_with_og(trnlf, marker = "trnL-trnF"),
-  tar_file(
-    trnlf_align_file,
-    write_phy(rbcl_with_og, "_targets/user/iqtree/trnlf.phy")
-  ),
+  # only do rbcL, since trnLF sequences are too diverged to align
+  rbcl_with_og = align_with_og(rbcl_seqs, marker = "rbcL"),
   # Build tree ----
   rbcl_tree = iqtree(
-    alignment = rbcl_align_file,
+    alignment = rbcl_with_og,
+    wd = "_targets/user/iqtree",
     m = "MFP", # test model followed by ML analysis
     bb = 1000,
     seed = 20240301,
@@ -46,21 +41,7 @@ tar_plan(
       "-nt", "AUTO"
     )
   ),
-  trnlf_tree = iqtree(
-    alignment = trnlf_align_file,
-    m = "MFP",
-    bb = 1000,
-    seed = 20240301,
-    redo = TRUE,
-    other_args = c(
-      "-mset", "GTR",
-      "-mrate", "E,I,G,I+G",
-      "-t", "PARS",
-      "-nt", "AUTO"
-    )
-  ),
-  # rbcl_monophyly = check_monophy(rbcl_tree),
-  # trnlf_monophyly = check_monophy(trnlf_tree),
+  rbcl_monophyly = check_monophy(rbcl_tree),
   # Write report ----
   tarchetypes::tar_quarto(
     report

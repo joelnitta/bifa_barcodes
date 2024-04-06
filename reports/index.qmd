@@ -1,31 +1,74 @@
 ---
-title: Reports
+title: Technical Validation
 ---
 
 ```{r}
 #| label: load
 targets::tar_load(
   c(
-    rbcl,
-    rbcl_dist,
-    trnlf_dist),
+    monophyly_res,
+    rbcl_seqs,
+    trnlf_seqs,
+    rbcl_seqs_no_hybrids,
+    trnlf_seqs_no_hybrids,
+    blast_test_res_raw),
   store = here::here("_targets/"))
 
 source(here::here("R/packages.R"))
-```
-
-There are `r length(rbcl)` rbcL sequences.
-
-```{r}
-rbcl_dist %>%
-  ggplot(aes(x = dist, fill = comp_type)) +
-  geom_histogram() +
-  facet_wrap(vars(comp_type), nrow = 2, ncol = 1, scales = "free_y")
+library(glue)
 ```
 
 ```{r}
-trnlf_dist %>%
-  ggplot(aes(x = dist, fill = comp_type)) +
-  geom_histogram() +
-  facet_wrap(vars(comp_type), nrow = 2, ncol = 1, scales = "free_y")
+#| label: blast-test-stats
+
+blast_res_totals <-
+  blast_test_res_raw %>%
+  mutate(result = if_else(fail, "Fail", "Pass")) %>%
+  tabyl(result, dataset) %>%
+  adorn_totals("row")
+
+blast_res_perc <-
+  blast_test_res_raw %>%
+  mutate(result = if_else(fail, "Fail", "Pass")) %>%
+  tabyl(result, dataset) %>%
+  adorn_percentages("col") %>%
+  rename_with(~paste0(.x, "_perc"), !matches("result")) %>%
+  mutate(across(where(is.numeric), ~scales::percent(.x, 0.1)))
+
+blast_res_table <-
+  left_join(blast_res_totals, blast_res_perc, by = "result") %>%
+  mutate(
+    across(contains("_perc"), ~replace_na(.x, "100%")),
+    rbcl = glue("{rbcl} ({rbcl_perc})"),
+    rbcl_no_hybrids = glue("{rbcl_no_hybrids} ({rbcl_no_hybrids_perc})"),
+    trnlf = glue("{trnlf} ({trnlf_perc})"),
+    trnlf_no_hybrids = glue("{trnlf_no_hybrids} ({trnlf_no_hybrids_perc})")
+  ) %>%
+  select(-contains("_perc"))
+
+blast_res_totals <-
+  blast_res_totals %>%
+  mutate(result = str_to_lower(result)) %>%
+  split(.$result)
+
+blast_res_perc <-
+  blast_res_perc %>%
+  mutate(result = str_to_lower(result)) %>%
+  split(.$result)
+
+blast_res_long <- 
+  blast_test_res_raw %>%
+  group_by(dataset) %>%
+  count(fail) %>%
+  mutate(total = sum(n)) %>%
+  ungroup() %>%
+  mutate(perc = n / total) %>%
+  mutate(perc = scales::percent(perc, 0.1))
+
+blast_res_best <-
+  blast_res_long %>%
+  filter(fail == FALSE) %>%
+  arrange(perc)
 ```
+
+Rates of successful identification in the BLAST test ranged from _ to _ by da

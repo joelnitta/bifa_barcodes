@@ -27,6 +27,8 @@ tar_plan(
     "data_raw/species_complex.txt",
     read_lines(!!.x)
   ),
+
+  # Filter data ---
   # - Drop specimens not identified to species
   rbcl_seqs = drop_indets(rbcl_seqs_all),
   trnlf_seqs = drop_indets(trnlf_seqs_all),
@@ -36,38 +38,53 @@ tar_plan(
   trnlf_seqs_no_hybrids = drop_complex_hybrids(
     trnlf_seqs, sp_complex, hybrid_taxa),
 
-  # Align sequences ----
-  # Only do rbcL, since trnLF sequences are too diverged to align
-  # - Align ingroup only
-  rbcl_fern_align = align_seqs(rbcl_seqs),
-  # - Align with outgroup
-  rbcl_with_og = align_with_og(rbcl_seqs, marker = "rbcL"),
-
-  # Gap test ----
-  # Analyze genetic distances
-  rbcl_dist = analyze_dist(rbcl_fern_align),
-
   # Monophyly test ----
+  # Only do rbcL, since trnLF sequences are too diverged to align
+  # - Prep lists for looping
+  seqs_for_phy_analysis = list(rbcl_seqs, rbcl_seqs_no_hybrids),
+  seqs_phy_names = c("rbcl", "rbcl_no_hybrids"),
+  # - Align sequences with outgroup and write to file
+  tar_target(
+    seqs_for_phy_aligned,
+    align_with_og(seqs_for_phy_analysis[[1]], marker = "rbcL"),
+    pattern = map(seqs_for_phy_analysis)
+  ),
+  tar_target(
+    alignment_files,
+    write_phy(
+      seqs_for_phy_aligned,
+      paste0("_targets/user/iqtree/", seqs_phy_names, ".phy")
+    ),
+    pattern = map(seqs_for_phy_aligned, seqs_phy_names)
+  ),
   # - Build tree
-  rbcl_tree = iqtree(
-    alignment = rbcl_with_og,
-    wd = "_targets/user/iqtree",
-    m = "MFP", # test model followed by ML analysis
-    bb = 1000,
-    seed = 20240301,
-    redo = TRUE,
-    other_args = c(
-      "-mset", "GTR", # only test GTR models
-      "-mrate", "E,I,G,I+G", # don't test free-rate models
-      "-t", "PARS",
-      "-nt", "AUTO"
-    )
+  tar_target(
+    barcode_tree,
+    iqtree(
+      aln_path = alignment_files[[2]],
+      wd = "_targets/user/iqtree",
+      m = "MFP", # test model followed by ML analysis
+      bb = 1000,
+      seed = 20240301,
+      redo = TRUE,
+      other_args = c(
+        "-mset", "GTR", # only test GTR models
+        "-mrate", "E,I,G,I+G", # don't test free-rate models
+        "-t", "PARS",
+        "-nt", "AUTO"
+      )
+    ),
+    pattern = map(alignment_files)
   ),
   # - Analyze monophyly
-  rbcl_monophyly = check_monophy(rbcl_tree),
+  tar_target(
+    monophyly_res,
+    check_monophy(barcode_tree, dataset = seqs_phy_names),
+    pattern = map(barcode_tree, seqs_phy_names)
+  ),
 
   # BLAST test ----
-  # - create list for looping
+  # - create lists for looping
   seqs_list = list(
     rbcl_seqs, trnlf_seqs, rbcl_seqs_no_hybrids, trnlf_seqs_no_hybrids),
   seqs_names = c(
@@ -111,10 +128,12 @@ tar_plan(
     load_blast_tsv(blast_res_tsv, seqs_names),
     pattern = map(blast_res_tsv, seqs_names)
   ),
+  # Filter out matches at < 95% of sequence length,
+  # flag intra- vs. inter-specific matches
   tar_target(
     blast_res,
-    prep_blast_res(blast_res_raw),
-    pattern = map(blast_res_raw)
+    prep_blast_res(blast_res_raw, seqs_list[[1]]),
+    pattern = map(blast_res_raw, seqs_list)
   ),
   tar_target(
     cutoff_table,
@@ -124,12 +143,13 @@ tar_plan(
   tar_target(
     blast_test_res_raw,
     test_blast(
-      blast_res, seqs_names, cutoff_table,
+      blast_res,
+      dataset_select = seqs_names,
+      cutoff_table
     ),
     pattern = map(seqs_names)
   ),
   blast_fail_rate_summary = summarize_blast_fail_rate(blast_test_res_raw),
-  # - Load BLAST query results
   # Write report ----
   tarchetypes::tar_quarto(
     report

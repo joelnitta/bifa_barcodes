@@ -4,10 +4,11 @@
 #' @param outgroup Name of sinlge tip to use as outgroup.
 #' @param sp_delim Character used to separate species name from voucher data
 #' in tree tip labels
+#' @param dataset Name of dataset analyzed
 #'
 #' @return Dataframe (tibble) with monophyly status for each species
 check_monophy <- function(
-  tree, outgroup = "Zygnema_circumcarinatum", sp_delim = "__") {
+  tree, outgroup = "Zygnema_circumcarinatum", sp_delim = "__", dataset) {
 
   assertthat::assert_that(assertthat::is.string(outgroup))
   assertthat::assert_that(assertthat::is.string(sp_delim))
@@ -38,7 +39,8 @@ check_monophy <- function(
     rownames_to_column("species") %>%
     as_tibble() %>%
     filter(!species %in% og_taxa) %>%
-    janitor::clean_names()
+    janitor::clean_names() %>%
+    mutate(dataset = dataset)
 
 }
 
@@ -83,6 +85,15 @@ analyze_dist <- function(alignment) {
     )
 }
 
+
+
+#' Write DNA seqeunces to PHYLIP
+#'
+#' @param x Object of class DNAbin.
+#' @param file Path to write sequences.
+#' @param ... Other args not used by this function.
+#'
+#' @return Path to written file
 write_phy <- function(x, file, ...) {
   ips::write.phy(x = x, file = file, ...)
   return(file)
@@ -652,30 +663,34 @@ load_blast_tsv <- function(blast_out_path, dataset_name) {
   mutate(dataset = dataset_name)
 }
 
-prep_blast_res <- function(blast_res_raw) {
+prep_blast_res <- function(blast_res_raw, q_seqs) {
+
+  # Get lengths (bp) of query seqs
+  q_seqs <- ape::del.gaps(q_seqs)
+  seq_lengths <-
+    tibble(
+      qseqid = names(q_seqs),
+      q_seq_len = map_dbl(q_seqs, length)
+    )
 
   blast_res_raw %>%
-    # select(qseqid, sseqid, pident, evalue, bitscore) %>%
-    filter(qseqid != sseqid) %>%
+    left_join(seq_lengths, by = "qseqid", relationship = "many-to-one") %>%
+    assert(not_na, q_seq_len) %>%
     mutate(
       q_species = str_split(qseqid, "__") %>% map_chr(1)) %>%
     mutate(
       s_species = str_split(sseqid, "__") %>% map_chr(1)) %>%
+    filter(length >= 0.95 * q_seq_len) %>%
     group_by(q_species) %>%
     mutate(n_indiv = n_distinct(qseqid)) %>%
     ungroup() %>%
     mutate(
-      comp_type = if_else(q_species == s_species, "intra", "inter")
+      comp_type = case_when(
+        qseqid == sseqid ~ "self",
+        q_species == s_species ~ "intra",
+        q_species != s_species ~ "inter"
+      )
     )
-}
-
-get_min_intra_dist <- function(blast_res) {
-  blast_res %>%
-    filter(comp_type == "intra") %>%
-    group_by(s_species) %>%
-    slice_min(pident) %>%
-    ungroup() %>%
-    arrange(pident)
 }
 
 get_species_cutoff <- function(blast_res, dataset_select) {
@@ -694,7 +709,10 @@ get_species_cutoff <- function(blast_res, dataset_select) {
 }
 
 test_blast <- function(
-  blast_res, dataset_select, cutoff_table, cutoff_type_select = "mean") {
+  blast_res,
+  dataset_select, cutoff_table, cutoff_type_select = "mean") {
+
+  # Obtain value to use for infraspecific cutoff
   intra_cutoff <-
     cutoff_table %>%
     filter(str_detect(dataset, "no_hybrids")) %>%

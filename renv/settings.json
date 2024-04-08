@@ -1,7 +1,13 @@
 {
   "bioconductor.version": null,
   "external.libraries": [],
-  "ignored.packages": [],
+  "ignored.packages": [
+    "jsonlite",
+    "rlang",
+    "languageserver",
+    "reprex",
+    "mdlincoln/docthis"
+  ],
   "package.dependency.fields": [
     "Imports",
     "Depends",

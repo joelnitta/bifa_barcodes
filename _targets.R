@@ -16,7 +16,7 @@ tar_plan(
   # - rbcL sequences (short)
   tar_file_read(
     rbcl_seqs_all_short,
-    "data_raw/BIFA_rbcL_analyses_240407_short.fasta",
+    "data_raw/BIFA_rbcL_analyses_240407_barcoding_short.fasta",
     ape::read.FASTA(!!.x),
   ),
   # - trnLF sequences
@@ -207,6 +207,7 @@ tar_plan(
   blast_fail_rate_summary = summarize_blast_fail_rate(blast_test_res_raw),
   # Write report ----
   tarchetypes::tar_quarto(
-    report
+    report,
+    quiet = FALSE
   )
 )

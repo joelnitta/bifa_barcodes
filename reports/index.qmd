@@ -17,6 +17,7 @@ targets::tar_load(
 
 source(here::here("R/packages.R"))
 library(glue)
+library(janitor)
 library(ggtext)
 ```
 
@@ -27,8 +28,8 @@ comp_cols <- palette.colors(n = 8, palette = "Okabe-Ito")[c("vermillion", "blue"
 dist_plot <-
   barcode_dist %>%
   mutate(
-    genus_1 = str_split(species_1, "_") %>% map_chr(1),
-    genus_2 = str_split(species_2, "_") %>% map_chr(1)) %>%
+    genus_1 = str_split(species_1, " ") %>% map_chr(1),
+    genus_2 = str_split(species_2, " ") %>% map_chr(1)) %>%
   filter(genus_1 == genus_2) %>%
   ggplot(aes(x = dist, fill = comp_type)) +
   geom_histogram(position = "dodge", binwidth = 0.01) +
@@ -74,19 +75,13 @@ blast_res_table <-
     rbcl = glue("{rbcl} ({rbcl_perc})"),
     rbcl_no_hybrids = glue("{rbcl_no_hybrids} ({rbcl_no_hybrids_perc})"),
     trnlf = glue("{trnlf} ({trnlf_perc})"),
-    trnlf_no_hybrids = glue("{trnlf_no_hybrids} ({trnlf_no_hybrids_perc})")
+    trnlf_no_hybrids = glue("{trnlf_no_hybrids} ({trnlf_no_hybrids_perc})"),
+    rbcl_short = glue("{rbcl_short} ({rbcl_short_perc})"),
+    rbcl_no_hybrids_short = glue("{rbcl_no_hybrids_short} ({rbcl_no_hybrids_short_perc})")
   ) %>%
-  select(-contains("_perc"))
-
-blast_res_totals <-
-  blast_res_totals %>%
-  mutate(result = str_to_lower(result)) %>%
-  split(.$result)
-
-blast_res_perc <-
-  blast_res_perc %>%
-  mutate(result = str_to_lower(result)) %>%
-  split(.$result)
+  select(
+    result, rbcl, rbcl_no_hybrids, rbcl_short,
+    rbcl_no_hybrids_short, trnlf, trnlf_no_hybrids)
 
 blast_res_long <- 
   blast_test_res_raw %>%
@@ -100,7 +95,7 @@ blast_res_long <-
 blast_res_best <-
   blast_res_long %>%
   filter(fail == FALSE) %>%
-  arrange(perc)
+  arrange(desc(perc))
 ```
 
-Rates of successful identification in the BLAST test ranged from _ to _ by da
+Rates of successful identification in the BLAST test ranged from _ to _ by dataset.

@@ -679,16 +679,30 @@ prep_blast_res <- function(blast_res_raw, q_seqs) {
     )
 
   blast_res_raw %>%
+    # Add query seq lengths
     left_join(seq_lengths, by = "qseqid", relationship = "many-to-one") %>%
     assert(not_na, q_seq_len) %>%
-    mutate(
-      q_species = str_split(qseqid, "__") %>% map_chr(1)) %>%
-    mutate(
-      s_species = str_split(sseqid, "__") %>% map_chr(1)) %>%
+    # Filter to only those matching 95% of original sequence length
     filter(length >= 0.95 * q_seq_len) %>%
+    # Parse out query species and subject species
+    # while ignoring infraspecific taxa
+    mutate(
+      # '__' separates taxon and voucher
+      q_taxon = str_split_i(qseqid, "__", 1),
+      s_taxon = str_split_i(sseqid, "__", 1),
+      # '_' separates genus, specific epithet, and infraspecific epithet
+      # eg: "Asplenium_wilfordii_var._densum"
+      q_genus = str_split_i(q_taxon, "_", 1),
+      s_genus = str_split_i(s_taxon, "_", 1),
+      q_specific_epithet = str_split_i(q_taxon, "_", 2),
+      s_specific_epithet = str_split_i(s_taxon, "_", 2),
+      q_species = paste(q_genus, q_specific_epithet),
+      s_species = paste(s_genus, s_specific_epithet)
+    ) %>%
     group_by(q_species) %>%
     mutate(n_indiv = n_distinct(qseqid)) %>%
     ungroup() %>%
+    # Classify comparison types
     mutate(
       comp_type = case_when(
         qseqid == sseqid ~ "self",
@@ -717,11 +731,18 @@ test_blast <- function(
   blast_res,
   dataset_select, cutoff_table, cutoff_type_select = "mean") {
 
+  # Fix detection of 'rbcl_short'
+  if (str_detect(dataset_select, "short")) {
+    dataset_select_text <- "short"
+  } else {
+    dataset_select_text <- dataset_select
+  }
+
   # Obtain value to use for infraspecific cutoff
   intra_cutoff <-
     cutoff_table %>%
     filter(str_detect(dataset, "no_hybrids")) %>%
-    filter(str_detect(dataset, dataset_select)) %>%
+    filter(str_detect(dataset, dataset_select_text)) %>%
     filter(str_detect(cutoff_type, cutoff_type_select)) %>%
     pull(value)
 
@@ -788,8 +809,14 @@ calc_barcode_dist <- function(seqs_aligned) {
     mutate(voucher_2 = str_remove_all(voucher_2, "\\|.*()")) %>%
     # extract species name and match type
     mutate(
-      species_1 = str_split(voucher_1, "__") %>% map_chr(1),
-      species_2 = str_split(voucher_2, "__") %>% map_chr(1),
+      taxon_1 = str_split_i(voucher_1, "__", 1),
+      taxon_2 = str_split_i(voucher_2, "__", 1),
+      genus_1 = str_split_i(voucher_1, "_", 1),
+      genus_2 = str_split_i(voucher_2, "_", 1),
+      specific_epithet_1 = str_split_i(voucher_1, "_", 2),
+      specific_epithet_2 = str_split_i(voucher_2, "_", 2),
+      species_1 = paste(genus_1, specific_epithet_1),
+      species_2 = paste(genus_2, specific_epithet_2),
       comp_type = case_when(
         voucher_1 == voucher_2 ~ "self",
         species_1 == species_2 ~ "intra",

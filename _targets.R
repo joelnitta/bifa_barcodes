@@ -1,18 +1,28 @@
 source("R/packages.R")
 source("R/functions.R")
 
+tar_option_set(
+  workspace_on_error = TRUE
+)
+
 tar_plan(
   # Load data ---
   # - rbcL sequences
   tar_file_read(
     rbcl_seqs_all,
-    "data_raw/BIFA_rbcL_analyses_240404.fasta",
+    "data_raw/BIFA_rbcL_analyses_240407.fasta",
+    ape::read.FASTA(!!.x),
+  ),
+  # - rbcL sequences (short)
+  tar_file_read(
+    rbcl_seqs_all_short,
+    "data_raw/BIFA_rbcL_analyses_240407_short.fasta",
     ape::read.FASTA(!!.x),
   ),
   # - trnLF sequences
   tar_file_read(
     trnlf_seqs_all,
-    "data_raw/BIFA_trnLF_analyses_240404.fasta",
+    "data_raw/BIFA_trnLF_analyses_240408.fasta",
     ape::read.FASTA(!!.x),
   ),
   # - hybrid taxa
@@ -27,22 +37,72 @@ tar_plan(
     "data_raw/species_complex.txt",
     read_lines(!!.x)
   ),
+  # - PPG I classification system (modified)
+  tar_file_read(
+    ppgi,
+    "data_raw/ppgi_taxonomy_mod.csv",
+    read_csv(!!.x)
+  ),
 
   # Filter data ---
   # - Drop specimens not identified to species
   rbcl_seqs = drop_indets(rbcl_seqs_all),
+  rbcl_seqs_short = drop_indets(rbcl_seqs_all_short),
   trnlf_seqs = drop_indets(trnlf_seqs_all),
   # - Also drop species complexes and hybrids
   rbcl_seqs_no_hybrids = drop_complex_hybrids(
     rbcl_seqs, sp_complex, hybrid_taxa),
+  rbcl_seqs_no_hybrids_short = drop_complex_hybrids(
+    rbcl_seqs_short, sp_complex, hybrid_taxa),
   trnlf_seqs_no_hybrids = drop_complex_hybrids(
     trnlf_seqs, sp_complex, hybrid_taxa),
+  # - create lists for looping
+  seqs_list = list(
+    rbcl_seqs, rbcl_seqs_no_hybrids,
+    trnlf_seqs, trnlf_seqs_no_hybrids,
+    rbcl_seqs_short, rbcl_seqs_no_hybrids_short),
+  seqs_names = c(
+    "rbcl", "rbcl_no_hybrids",
+    "trnlf", "trnlf_no_hybrids",
+    "rbcl_short", "rbcl_no_hybrids_short"
+  ),
+
+  # Barcoding gap ---
+  # - Subset each set of sequences to families with >1 species per family
+  tar_target(
+    seqs_by_family,
+    subset_seqs_to_family(
+      seqs_list[[1]],
+      seqs_names,
+      ppgi
+    ),
+    pattern = map(seqs_list, seqs_names)
+  ),
+  # - Align seqs within each family
+  seqs_by_family_for_align = seqs_by_family, # need this to map by family
+  tar_target(
+    seqs_by_family_aligned,
+    align_seqs(seqs_by_family_for_align[[1]]),
+    pattern = map(seqs_by_family_for_align),
+    iteration = "list"
+  ),
+  # - Calculate barcode marker distances within each family
+  tar_target(
+    barcode_dist,
+    calc_barcode_dist(seqs_by_family_aligned),
+    pattern = map(seqs_by_family_aligned)
+  ),
 
   # Monophyly test ----
   # Only do rbcL, since trnLF sequences are too diverged to align
   # - Prep lists for looping
-  seqs_for_phy_analysis = list(rbcl_seqs, rbcl_seqs_no_hybrids),
-  seqs_phy_names = c("rbcl", "rbcl_no_hybrids"),
+  seqs_for_phy_analysis = list(
+    rbcl_seqs, rbcl_seqs_no_hybrids,
+    rbcl_seqs_short, rbcl_seqs_no_hybrids_short
+    ),
+  seqs_phy_names = c(
+    "rbcl", "rbcl_no_hybrids",
+    "rbcl_short", "rbcl_no_hybrids_short"),
   # - Align sequences with outgroup and write to file
   tar_target(
     seqs_for_phy_aligned,
@@ -61,7 +121,7 @@ tar_plan(
   tar_target(
     barcode_tree,
     iqtree(
-      aln_path = alignment_files[[2]],
+      aln_path = alignment_files,
       wd = "_targets/user/iqtree",
       m = "MFP", # test model followed by ML analysis
       bb = 1000,
@@ -74,7 +134,8 @@ tar_plan(
         "-nt", "AUTO"
       )
     ),
-    pattern = map(alignment_files)
+    pattern = map(alignment_files),
+    iteration = "list"
   ),
   # - Analyze monophyly
   tar_target(
@@ -84,12 +145,6 @@ tar_plan(
   ),
 
   # BLAST test ----
-  # - create lists for looping
-  seqs_list = list(
-    rbcl_seqs, trnlf_seqs, rbcl_seqs_no_hybrids, trnlf_seqs_no_hybrids),
-  seqs_names = c(
-    "rbcl", "trnlf", "rbcl_no_hybrids", "trnlf_no_hybrids"
-  ),
   # - Write out sequences for BLAST db
   tar_target(
     seqs_for_blast_db,

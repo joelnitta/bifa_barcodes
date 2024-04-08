@@ -1,6 +1,6 @@
 library(targets)
 library(tarchetypes)
-# library(crew)
+library(crew)
 library(assertr)
 library(tidyverse)
 library(ftolr)

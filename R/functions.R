@@ -327,18 +327,23 @@ iqtree <- function(alignment = NULL, wd = getwd(),
   # Read in resulting tree(s)
   # Default: use default treefile if tree_path not provided
   if (is.null(tree_path)) {
-    tree_path <- fs::path(wd, deparse(substitute(alignment))) %>%
-      fs::path_ext_set(".phy.treefile")
+    if (is.null(aln_path)) {
+      tree_path <- fs::path(wd, deparse(substitute(alignment))) %>%
+        fs::path_ext_set(".phy.treefile")
+    } else {
+      tree_path <- fs::path(fs::path_abs(aln_path)) %>%
+        fs::path_ext_set(".phy.treefile")
+    }
   }
 
   # Return single tree if only one file in tree_path
-  if(length(tree_path) == 1) {
+  if (length(tree_path) == 1) {
     assertthat::assert_that(assertthat::is.readable(tree_path))
     res <- ape::read.tree(tree_path)
   }
 
   # Return list of trees if multiple files in tree_path
-  if(length(tree_path) > 1) {
+  if (length(tree_path) > 1) {
     # Set up results list to have same
     # names as tree_path
     res <- vector(length = length(tree_path))
@@ -736,4 +741,61 @@ summarize_blast_fail_rate <- function(blast_test_res_raw) {
     group_by(dataset) %>%
     count(fail) %>%
     ungroup()
+}
+
+subset_seqs_to_family <- function(seqs, dataset, ppgi) {
+  seqs_keep <-
+    tibble(seq = names(seqs)) %>%
+    mutate(
+      genus = str_split(seq, "_") %>% map_chr(1),
+      species = str_split(seq, "__") %>% map_chr(1)
+    ) %>%
+    left_join(ppgi, by = "genus") %>%
+    assert(not_na, genus, family) %>%
+    add_count(family) %>%
+    filter(n > 1) %>%
+    select(-n) %>%
+    group_by(family) %>%
+    mutate(n_species = n_distinct(species)) %>%
+    filter(n_species > 1) %>%
+    ungroup()
+
+  seqs <-
+    seqs[seqs_keep$seq]
+
+  names(seqs) <- paste0(names(seqs), "|", dataset)
+
+  split(seqs, as.factor(seqs_keep$family))
+}
+
+calc_barcode_dist <- function(seqs_aligned) {
+  # Calculate distances as matrix
+  seqs_dist <- ape::dist.dna(
+    seqs_aligned, model = "K80", as.matrix = TRUE, pairwise.deletion = TRUE)
+  # set diagonal (self-matches) to NA
+  diag(seqs_dist) <- NaN
+  # set upper triangle (reverse direction match) to NA
+  seqs_dist[upper.tri(seqs_dist)] <- NaN
+  # convert to dataframe
+  as.data.frame(seqs_dist) %>%
+    rownames_to_column("voucher_1") %>%
+    pivot_longer(names_to = "voucher_2", values_to = "dist", -voucher_1) %>%
+    filter(!is.na(dist)) %>%
+    as_tibble() %>%
+    # extract dataset name
+    separate_wider_delim(
+      cols = voucher_1, delim = "|", names = c("voucher_1", "dataset")) %>%
+    mutate(voucher_2 = str_remove_all(voucher_2, "\\|.*()")) %>%
+    # extract species name and match type
+    mutate(
+      species_1 = str_split(voucher_1, "__") %>% map_chr(1),
+      species_2 = str_split(voucher_2, "__") %>% map_chr(1),
+      comp_type = case_when(
+        voucher_1 == voucher_2 ~ "self",
+        species_1 == species_2 ~ "intra",
+        species_1 != species_2 ~ "inter"
+      )
+    ) %>%
+    select(voucher_1, voucher_2, species_1, species_2, dist, comp_type, dataset) %>%
+    assert(not_na, everything())
 }

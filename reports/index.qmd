@@ -6,6 +6,7 @@ title: Technical Validation
 #| label: load
 targets::tar_load(
   c(
+    barcode_dist,
     monophyly_res,
     rbcl_seqs,
     trnlf_seqs,
@@ -16,6 +17,37 @@ targets::tar_load(
 
 source(here::here("R/packages.R"))
 library(glue)
+library(ggtext)
+```
+
+```{r}
+comp_cols <- palette.colors(n = 8, palette = "Okabe-Ito")[c("vermillion", "blue")] %>%
+  set_names(c("inter", "intra"))
+
+dist_plot <-
+  barcode_dist %>%
+  mutate(
+    genus_1 = str_split(species_1, "_") %>% map_chr(1),
+    genus_2 = str_split(species_2, "_") %>% map_chr(1)) %>%
+  filter(genus_1 == genus_2) %>%
+  ggplot(aes(x = dist, fill = comp_type)) +
+  geom_histogram(position = "dodge", binwidth = 0.01) +
+  facet_wrap(vars(dataset), scales = "free_y") +
+  labs(
+    x = "Distance",
+    y = "Frequency",
+    fill = "Type of distance"
+  ) +
+  scale_x_continuous(labels = scales::percent) +
+  scale_fill_manual(
+    values = comp_cols,
+    breaks = c("inter", "intra"),
+    labels = c("Interspecific", "Intraspecific")) +
+  theme(
+    legend.position = "bottom",
+    strip.text = element_text(face = "italic"))
+
+ggsave(plot = dist_plot, file = here::here("results/dist_plot.pdf"))
 ```
 
 ```{r}

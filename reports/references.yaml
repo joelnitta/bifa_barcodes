@@ -1,0 +1,588 @@
+---
+references:
+- id: Altschul1997
+  author:
+    - family: Altschul
+      given: Stephen F.
+    - family: Madden
+      given: Thomas L.
+    - family: Schäffer
+      given: Alejandro A.
+    - family: Zhang
+      given: Jinghui
+    - family: Zhang
+      given: Zheng
+    - family: Miller
+      given: Webb
+    - family: Lipman
+      given: David J.
+  citation-key: Altschul1997
+  container-title: Nucleic Acids Research
+  DOI: 10.1093/nar/25.17.3389
+  issued:
+    - year: 1997
+  page: 3389-3402
+  title: >-
+    Gapped BLAST and PSI-BLAST: A new generation of protein database search
+    programs
+  type: article-journal
+  volume: '25'
+
+- id: Barrington1989
+  author:
+    - family: Barrington
+      given: David S
+    - family: Haufler
+      given: Christopher H
+    - family: Werth
+      given: Charles R.
+  citation-key: Barrington1989
+  container-title: American Fern Journal
+  DOI: 10.2307/1547160
+  ISSN: 1938-422X
+  issue: '2'
+  issued:
+    - year: 1989
+  page: 55-64
+  title: Hybridization, reticulation, and species concepts in the ferns
+  type: article-journal
+  URL: papers://ebd7d3df-d8f1-4be8-bcf7-4fb07ababf30/Paper/p1266
+  volume: '79'
+
+- id: Camacho2009
+  author:
+    - family: Camacho
+      given: C
+    - family: Coulouris
+      given: G
+    - family: Avagyan
+      given: V
+    - family: Ma
+      given: 'N'
+    - family: Papadopoulos
+      given: J
+    - family: Bealer
+      given: K
+    - family: Madden
+      given: T
+  citation-key: Camacho2009
+  container-title: BMC Bioinformatics
+  issue: '1'
+  issued:
+    - year: 2009
+  page: '421'
+  title: 'BLAST+: architecture and applications'
+  type: article-journal
+  URL: papers://ebd7d3df-d8f1-4be8-bcf7-4fb07ababf30/Paper/p1417
+  volume: '10'
+
+- id: Chen2013a
+  author:
+    - family: Chen
+      given: Cheng-Wei
+    - family: Huang
+      given: Yao-Moan
+    - family: Kuo
+      given: Li-Yaung
+    - family: Nguyen
+      given: Quoc Dat
+    - family: Luu
+      given: Hong Truong
+    - family: Callado
+      given: John Rey
+    - family: Farrar
+      given: Donald R
+    - family: Chiou
+      given: Wen-Liang
+  citation-key: Chen2013a
+  container-title: Annals of Botany
+  ISSN: 1095-8290
+  issue: '4'
+  issued:
+    - year: 2013
+      month: 2
+  page: 663-673
+  title: >-
+    *trnL-F* is a powerful marker for DNA identification of field vittarioid
+    gametophytes (Pteridaceae)
+  type: article-journal
+  URL: papers://ebd7d3df-d8f1-4be8-bcf7-4fb07ababf30/Paper/p2251
+  volume: '111'
+
+- id: DeGroot2011a
+  author:
+    - family: Groot
+      given: G. Arjen
+      non-dropping-particle: de
+    - family: During
+      given: Heinjo J.
+    - family: Maas
+      given: Jan W.
+    - family: Schneider
+      given: Harald
+    - family: Vogel
+      given: Johannes C
+    - family: Erkens
+      given: Roy H. J.
+  citation-key: DeGroot2011a
+  container-title: PLoS ONE
+  DOI: 10.1371/journal.pone.0016371
+  ISSN: 1932-6203
+  issue: '1'
+  issued:
+    - year: 2011
+  page: e16371
+  title: >-
+    Use of *rbcL* and *trnL-F* as a two-locus DNA barcode for identification of
+    NW-European ferns: An ecological perspective
+  type: article-journal
+  URL: papers://ebd7d3df-d8f1-4be8-bcf7-4fb07ababf30/Paper/p1605
+  volume: '6'
+
+- id: Ebihara2010
+  author:
+    - family: Ebihara
+      given: Atsushi
+    - family: Nitta
+      given: Joel H.
+    - family: Ito
+      given: Motomi
+  citation-key: Ebihara2010
+  container-title: PLoS ONE
+  DOI: 10.1371/journal.pone.0015136
+  ISSN: 1932-6203
+  issue: '12'
+  issued:
+    - year: 2010
+      month: 12
+      day: 8
+  license: All rights reserved
+  page: e15136
+  title: >-
+    <span class="nocase">Molecular species identification with rich floristic
+    sampling: DNA barcoding the pteridophyte flora of Japan</span>
+  type: article-journal
+  URL: http://dx.plos.org/10.1371/journal.pone.0015136
+  volume: '5'
+
+- id: Gastony1992
+  author:
+    - family: Gastony
+      given: Gerald J.
+    - family: Yatskievych
+      given: George
+  citation-key: Gastony1992
+  container-title: American Journal of Botany
+  DOI: 10.1002/j.1537-2197.1992.tb14613.x
+  ISSN: 1537-2197
+  issue: '6'
+  issued:
+    - year: 1992
+  page: 716-722
+  title: >-
+    Maternal inheritance of the chloroplast and mitochondrial genomes in
+    cheilanthoid ferns
+  type: article-journal
+  URL: papers://ebd7d3df-d8f1-4be8-bcf7-4fb07ababf30/Paper/p1298
+  volume: '79'
+
+- id: Group2008
+  author:
+    - family: Hollingsworth
+      given: P. M.
+    - family: Forrest
+      given: L. L.
+    - family: Spouge
+      given: J. L.
+    - family: Hajibabaei
+      given: M.
+    - family: Ratnasingham
+      given: S.
+    - family: Bank
+      given: M.
+      non-dropping-particle: van der
+    - family: Chase
+      given: M. W.
+    - family: Cowan
+      given: R. S.
+    - family: Erickson
+      given: D. L.
+    - family: Fazekas
+      given: A. J.
+    - family: Graham
+      given: S. W.
+    - family: James
+      given: K. E.
+    - family: Kim
+      given: K.-J.
+    - family: Kress
+      given: W. J.
+    - family: Schneider
+      given: H.
+    - family: AlphenStahl
+      given: J.
+      non-dropping-particle: van
+    - family: Barrett
+      given: S. C.H.
+    - family: Berg
+      given: C.
+      non-dropping-particle: van den
+    - family: Bogarin
+      given: D.
+    - family: Burgess
+      given: K. S.
+    - family: Cameron
+      given: K. M.
+    - family: Carine
+      given: M.
+    - family: Chacon
+      given: J.
+    - family: Clark
+      given: A.
+    - family: Clarkson
+      given: J. J.
+    - family: Conrad
+      given: F.
+    - family: Devey
+      given: D. S.
+    - family: Ford
+      given: C. S.
+    - family: Hedderson
+      given: T. A.J.
+    - family: Hollingsworth
+      given: M. L.
+    - family: Husband
+      given: B. C.
+    - family: Kelly
+      given: L. J.
+    - family: Kesanakurti
+      given: P. R.
+    - family: Kim
+      given: J. S.
+    - family: Kim
+      given: Y.-D.
+    - family: Lahaye
+      given: R.
+    - family: Lee
+      given: H.-L.
+    - family: Long
+      given: D. G.
+    - family: Madrinan
+      given: S.
+    - family: Maurin
+      given: O.
+    - family: Meusnier
+      given: I.
+    - family: Newmaster
+      given: S. G.
+    - family: Park
+      given: C.-W.
+    - family: Percy
+      given: D. M.
+    - family: Petersen
+      given: G.
+    - family: Richardson
+      given: J. E.
+    - family: Salazar
+      given: G. A.
+    - family: Savolainen
+      given: V.
+    - family: Seberg
+      given: O.
+    - family: Wilkinson
+      given: M. J.
+    - family: Yi
+      given: D.-K.
+    - family: Little
+      given: D. P.
+  citation-key: Group2008
+  container-title: Proceedings of the National Academy of Sciences, USA
+  DOI: 10.1073/pnas.0905845106
+  ISSN: 0027-8424
+  issue: '31'
+  issued:
+    - year: 2009
+      month: 8
+  page: 12794-12797
+  title: A DNA barcode for land plants
+  type: article-journal
+  URL: >-
+    papers2://publication/doi/10.3354/esr00141
+    http://www.pnas.org/cgi/doi/10.1073/pnas.0905845106
+  volume: '106'
+
+- id: Katoh2002
+  author:
+    - family: Katoh
+      given: Kazutaka
+    - family: Misawa
+      given: Kazuharu
+    - family: Kuma
+      given: Keiichi
+    - family: Miyata
+      given: Takashi
+  citation-key: Katoh2002
+  container-title: Nucleic Acids Research
+  DOI: 10.1093/nar/gkf436
+  ISSN: 1362-4962
+  issue: '14'
+  issued:
+    - year: 2002
+  page: 3059-3066
+  PMID: '12136088'
+  title: >-
+    MAFFT: A novel method for rapid multiple sequence alignment based on fast
+    Fourier transform
+  type: article-journal
+  volume: '30'
+
+- id: Kimura1979
+  author:
+    - family: Kimura
+      given: M
+  citation-key: Kimura1979
+  container-title: Journal of Molecular Evolution
+  ISSN: 1432-1432
+  issued:
+    - year: 1979
+      month: 12
+  title: >-
+    A simple method for estimating evolutionary rates of base substitutions
+    through comparative studies …
+  type: article-journal
+  URL: >-
+    http://www.springerlink.com/index/K434L54572JK557H.pdf
+    papers://ebd7d3df-d8f1-4be8-bcf7-4fb07ababf30/Paper/p665
+
+- id: Kuo2018a
+  author:
+    - family: Kuo
+      given: Li-Yaung
+    - family: Tang
+      given: Te-Yen
+    - family: Li
+      given: Fay-Wei
+    - family: Su
+      given: Huei-Jiun
+    - family: Chiou
+      given: Wen-Liang
+    - family: Huang
+      given: Yao-Moan
+    - family: Wang
+      given: Chun-Neng
+  citation-key: Kuo2018a
+  container-title: Frontiers in Plant Science
+  DOI: 10.3389/fpls.2018.00486
+  ISSN: 1664462X
+  issue: April
+  issued:
+    - year: 2018
+  page: '486'
+  title: >-
+    Organelle genome inheritance in *Deparia* ferns (Athyriaceae, Aspleniineae,
+    Polypodiales)
+  type: article-journal
+  volume: '9'
+
+- id: Li2011
+  author:
+    - family: Li
+      given: Fay-Wei
+    - family: Kuo
+      given: Li-Yaung
+    - family: Rothfels
+      given: Carl J.
+    - family: Ebihara
+      given: Atsushi
+    - family: Chiou
+      given: Wen-Liang
+    - family: Windham
+      given: Michael D
+    - family: Pryer
+      given: Kathleen M
+  citation-key: Li2011
+  container-title: PLoS ONE
+  DOI: 10.1371/journal.pone.0026597
+  ISSN: 1932-6203
+  issue: '10'
+  issued:
+    - year: 2011
+      month: 10
+  page: e26597
+  title: '*rbcL* and *matK* earn two thumbs up as the core DNA barcode for ferns'
+  type: article-journal
+  URL: papers://ebd7d3df-d8f1-4be8-bcf7-4fb07ababf30/Paper/p1780
+  volume: '6'
+
+- id: Nguyen2015
+  author:
+    - family: Nguyen
+      given: Lam-Tung
+    - family: Schmidt
+      given: Heiko A.
+    - family: Haeseler
+      given: Arndt
+      non-dropping-particle: von
+    - family: Minh
+      given: Bui Quang
+  citation-key: Nguyen2015
+  container-title: Molecular Biology and Evolution
+  DOI: 10.1093/molbev/msu300
+  ISSN: '15371719'
+  issue: '1'
+  issued:
+    - year: 2015
+  page: 268-274
+  title: >-
+    IQ-TREE: A fast and effective stochastic algorithm for estimating
+    maximum-likelihood phylogenies
+  type: article-journal
+  volume: '32'
+
+- id: Nitta2020b
+  author:
+    - family: Nitta
+      given: Joel H.
+    - family: Ebihara
+      given: Atsushi
+    - family: Smith
+      given: Alan R.
+  citation-key: Nitta2020b
+  container-title: PLoS ONE
+  DOI: 10.1371/journal.pone.0241231
+  issue: '11'
+  issued:
+    - year: 2020
+      month: 11
+      day: 18
+  language: en
+  license: All rights reserved
+  page: e0241231
+  source: Zotero
+  title: >-
+    <span class="nocase">A taxonomic and molecular survey of the pteridophytes
+    of the Nectandra Cloud Forest Reserve, Costa Rica</span>
+  type: article-journal
+  volume: '15'
+
+- id: Nitta2022b
+  accessed:
+    - year: 2022
+      month: 9
+      day: 12
+  author:
+    - family: Nitta
+      given: Joel H.
+    - family: Schuettpelz
+      given: Eric
+    - family: Ramírez-Barahona
+      given: Santiago
+    - family: Iwasaki
+      given: Wataru
+  citation-key: Nitta2022b
+  container-title: Frontiers in Plant Science
+  container-title-short: Front. Plant Sci.
+  DOI: 10.3389/fpls.2022.909768
+  ISSN: 1664-462X
+  issued:
+    - year: 2022
+      month: 8
+      day: 24
+  license: Creative Commons Attribution 4.0 International License (CC-BY)
+  page: '909768'
+  source: DOI.org (Crossref)
+  title: >-
+    <span class="nocase">An open and continuously updated fern tree of
+    life</span>
+  type: article-journal
+  URL: https://www.frontiersin.org/articles/10.3389/fpls.2022.909768/full
+  volume: '13'
+
+- id: Schwery2016
+  accessed:
+    - year: 2022
+      month: 2
+      day: 4
+  author:
+    - family: Schwery
+      given: Orlando
+    - family: O’Meara
+      given: Brian C.
+  citation-key: Schwery2016
+  container-title: PeerJ Computer Science
+  DOI: 10.7717/peerj-cs.56
+  ISSN: 2376-5992
+  issued:
+    - year: 2016
+      month: 3
+      day: 30
+  language: en
+  page: e56
+  source: DOI.org (Crossref)
+  title: 'MonoPhy: a simple R package to find and visualize monophyly issues'
+  title-short: '*MonoPhy*'
+  type: article-journal
+  volume: '2'
+
+- id: Trujillo-Argueta2021
+  accessed:
+    - year: 2021
+      month: 12
+      day: 7
+  author:
+    - family: Trujillo-Argueta
+      given: Sonia
+    - family: Castillo
+      given: Rafael F.
+      non-dropping-particle: del
+    - family: Tejero-Diez
+      given: Daniel
+    - family: Matias-Cervantes
+      given: Carlos Alberto
+    - family: Velasco-Murguía
+      given: Abril
+  citation-key: Trujillo-Argueta2021
+  container-title: Scientific Reports
+  container-title-short: Sci Rep
+  DOI: 10/gnp3c6
+  ISSN: 2045-2322
+  issue: '1'
+  issued:
+    - year: 2021
+      month: 12
+  language: en
+  page: '22837'
+  source: DOI.org (Crossref)
+  title: >-
+    DNA barcoding ferns in an unexplored tropical montane cloud forest area of
+    southeast Oaxaca, Mexico
+  type: article-journal
+  URL: https://www.nature.com/articles/s41598-021-02237-8
+  volume: '11'
+
+- id: Vogel1998
+  author:
+    - family: Vogel
+      given: Johannes C
+    - family: Russell
+      given: S J
+    - family: Rumsey
+      given: Frederick J
+    - family: Barrett
+      given: J A
+    - family: Gibby
+      given: Mary
+  citation-key: Vogel1998
+  container-title: Botanica Acta
+  DOI: 10.1111/j.1438-8677.1998.tb00704.x
+  issue: '3'
+  issued:
+    - year: 1998
+  page: 247-249
+  title: >-
+    Evidence for maternal transmission of chloroplast DNA in the genus
+    *Asplenium* (Aspleniaceae, Pteridophyta)
+  type: article-journal
+  URL: papers://ebd7d3df-d8f1-4be8-bcf7-4fb07ababf30/Paper/p1299
+  volume: '111'
+...

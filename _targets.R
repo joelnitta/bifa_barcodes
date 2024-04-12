@@ -67,7 +67,7 @@ tar_plan(
     "rbcl_short", "rbcl_no_hybrids_short"
   ),
 
-  # Barcoding gap ---
+  # Barcoding gap test ---
   # - Subset each set of sequences to families with >1 species per family
   tar_target(
     seqs_by_family,
@@ -91,6 +91,11 @@ tar_plan(
     barcode_dist,
     calc_barcode_dist(seqs_by_family_aligned),
     pattern = map(seqs_by_family_aligned)
+  ),
+  # - Compare maximum intraspecific vs. minimum interspecific distances
+  tar_target(
+    barcode_gap_res_raw,
+    test_barcode_gap(barcode_dist)
   ),
 
   # Monophyly test ----

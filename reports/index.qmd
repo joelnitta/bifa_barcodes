@@ -1,5 +1,12 @@
 ---
-title: Technical Validation
+title: A DNA barcode reference of Asian ferns with expert-identified voucher specimens and DNA samples
+format: docx
+df-print: paged
+execute:
+  echo: false
+  warning: false
+  output: true
+bibliography: references.yaml
 ---
 
 ```{r}
@@ -12,100 +19,286 @@ targets::tar_load(
     trnlf_seqs,
     rbcl_seqs_no_hybrids,
     trnlf_seqs_no_hybrids,
-    blast_test_res_raw),
+    barcode_gap_res_raw,
+    blast_test_res_raw,
+    # tree plot
+    barcode_tree,
+    seqs_names,
+    sp_complex,
+    hybrid_taxa),
   store = here::here("_targets/"))
 
 source(here::here("R/packages.R"))
+source(here::here("R/functions.R"))
+
 library(glue)
 library(janitor)
 library(ggtext)
+library(ggtree)
 ```
 
 ```{r}
-```{r}
-#| label: gap-plot
+#| label: tree-plot
 
-n_intra_dist <- 
-  barcode_dist %>%
-  filter(comp_type == "intra") %>%
-  pull(species_1) %>%
+# extract tree from list
+rbcl_tree <- barcode_tree[seqs_names == "rbcl"][[1]]
+
+tree_tip_species <-
+  tibble(tip = rbcl_tree$tip.label) %>%
+  mutate(species = voucher_to_specimen(tip, "_"))
+
+# hybrid taxa
+hybrid_taxa_data <-
+  tree_tip_species %>%
+  mutate(
+    hybrid_taxon = case_when(
+      species %in% sp_complex ~ "Hybrid",
+      tip %in% hybrid_taxa ~ "Hybrid",
+      .default = "not_hybrid"
+    )
+  ) %>%
+  select(tip, hybrid_taxon)
+
+# monophyly test (requires infrasp sampling)
+monophy_test_all_markers <-
+  monophyly_res %>%
+  filter(monophyly != "Monotypic") %>%
+  group_by(species) %>%
+  summarize(
+    monophy_test = any(monophyly %in% "No") %>%
+      if_else("Fail", "Pass")
+  )
+
+monophy_tree_data <-
+  tree_tip_species %>%
+  left_join(
+    monophy_test_all_markers, by = "species", relationship = "many-to-one") %>%
+  mutate(monophy_test = replace_na(monophy_test, "NA")) %>%
+  select(tip, monophy_test)
+
+# gap test (requires infrasp sampling)
+gap_test_all_markers <-
+  barcode_gap_res_raw %>%
+  group_by(species) %>%
+  summarize(
+    gap_test = any(fail) %>%
+      if_else("Fail", "Pass")
+  ) %>%
+  mutate(species = str_replace_all(species, " ", "_"))
+
+gap_tree_data <-
+  tree_tip_species %>%
+  left_join(
+    gap_test_all_markers, by = "species", relationship = "many-to-one") %>%
+  mutate(gap_test = replace_na(gap_test, "NA")) %>%
+  select(tip, gap_test)
+
+# blast test (all samples)
+blast_test_all_markers <-
+  blast_test_res_raw %>%
+  rename(species = q_species) %>%
+  group_by(species) %>%
+  summarize(
+    blast_test = any(fail) %>%
+      if_else("Fail", "Pass")
+  ) %>% 
+  mutate(species = str_replace_all(species, " ", "_"))
+
+blast_tree_data <-
+  tree_tip_species %>%
+  left_join(
+    blast_test_all_markers, by = "species", relationship = "many-to-one") %>%
+  mutate(blast_test = replace_na(blast_test, "NA")) %>%
+  select(tip, blast_test)
+
+tree_plot_data <-
+  hybrid_taxa_data %>%
+  left_join(gap_tree_data, by = "tip", relationship = "one-to-one") %>%
+  left_join(monophy_tree_data, by = "tip", relationship = "one-to-one") %>%
+  left_join(blast_tree_data, by = "tip", relationship = "one-to-one") %>%
+  rename(
+    hybrid = hybrid_taxon,
+    gap = gap_test,
+    tree = monophy_test,
+    BLAST = blast_test) %>%
+  column_to_rownames("tip")
+
+circ_tree <- ggtree(rbcl_tree, layout = "fan", open.angle = 10, size = 0.3)
+
+oi_cols <- palette.colors(n = 9, palette = "Okabe-Ito")
+
+heatmap_cols <- c(
+  Pass = oi_cols[["skyblue"]],
+  Fail = oi_cols[["vermillion"]],
+  Hybrid = oi_cols[["orange"]],
+  not_hybrid = "white",
+  `NA` = "grey80"
+)
+
+heatmap_col_labels <- c(
+  "Pass", "Fail", "Hybrid", NULL, "NA"
+)
+
+plot <- gheatmap(
+    p = circ_tree, 
+    data = tree_plot_data,
+    colnames_angle = 90,
+    colnames_offset_y = 0.25,
+    width = 0.3,
+    hjust = 1) +
+  scale_fill_manual(values = heatmap_cols, breaks = c("Pass", "Fail", "Hybrid", "NA")) +
+  theme(legend.title = element_blank())
+
+ggsave(
+  plot = plot,
+  file = here::here("results/reports/figure_2.pdf"),
+  width = 10.1, height = 10.1, units = "in")
+```
+
+```{r}
+#| label: barcode-table
+
+# Number of species with multiple sequences per species
+n_species_mult_specimen <- 
+  barcode_gap_res_raw %>%
+  pull(species) %>%
   n_distinct()
 
-# Barcode gap plot
-comp_cols <- palette.colors(n = 8, palette = "Okabe-Ito")[c("vermillion", "blue")] %>%
-  set_names(c("inter", "intra"))
+# Barcode test results
+pretty_names <- tribble(
+  ~dataset, ~dataset_pretty, ~order,
+  "rbcl", "*rbcL*", 1,
+  "rbcl_no_hybrids", "*rbcL*, no hybrids", 2,
+  "rbcl_short", "*rbcL*, short", 3,
+  "rbcl_no_hybrids_short", "*rbcL*, short, no hybrids", 4,
+  "trnlf", "*trnL-F*", 5,
+  "trnlf_no_hybrids", "*trnL-F*, no hybrids", 6
+)
 
-dist_plot <-
-  dist_for_plot %>%
-  filter(dataset %in% c("rbcl", "trnlf")) %>%
-  ggplot(aes(x = dist, fill = comp_type)) +
-  geom_histogram(position = "dodge", binwidth = 0.01) +
-  facet_wrap(vars(dataset), scales = "free_y") +
-  labs(
-    x = "Distance",
-    y = "Frequency",
-    fill = "Type of distance"
-  ) +
-  scale_x_continuous(labels = scales::percent) +
-  scale_fill_manual(
-    values = comp_cols,
-    breaks = c("inter", "intra"),
-    labels = c("Interspecific", "Intraspecific")) +
-  theme(
-    legend.position = "bottom",
-    strip.text = element_text(face = "italic"))
+gap_table <-
+  barcode_gap_res_raw %>%
+  mutate(result = if_else(fail, "Fail", "Pass")) %>%
+  tabyl(dataset, result) %>%
+  adorn_totals("col") %>%
+  mutate(
+    percent = scales::percent(Pass / Total, 0.01),
+    gap = glue("{Pass}/{Total} ({percent})"),
+    test = "gap"
+  )
 
-ggplot(dist_dot_plot_data, aes(x = intra_dist, y = inter_dist)) +
-  geom_point()
+monophyly_table <-
+  monophyly_res %>%
+  filter(monophyly != "Monotypic") %>%
+  tabyl(dataset, monophyly) %>%
+  rename(Pass = Yes, Fail = No) %>%
+  adorn_totals("col") %>%
+  mutate(
+    percent = scales::percent(Pass / Total, 0.01),
+    monophyly = glue("{Pass}/{Total} ({percent})"),
+    test = "monophyly"
+  )
 
-ggsave(plot = dist_plot, file = here::here("results/dist_plot.pdf"))
+blast_table <-
+  blast_test_res_raw %>%
+  mutate(result = if_else(fail, "Fail", "Pass")) %>%
+  tabyl(dataset, result) %>%
+  adorn_totals("col") %>%
+  mutate(
+    percent = scales::percent(Pass / Total, 0.01),
+    blast = glue("{Pass}/{Total} ({percent})"),
+    test = "blast"
+  )
+
+barcoding_res_table <-
+  select(blast_table, dataset, blast) %>%
+  left_join(
+    select(monophyly_table, dataset, monophyly),
+    by = "dataset"
+  ) %>%
+  left_join(
+    select(gap_table, dataset, gap),
+    by = "dataset"
+  ) %>%
+  left_join(pretty_names, by = "dataset") %>%
+  mutate(dataset = dataset_pretty) %>%
+  arrange(order) %>%
+  select(Dataset = dataset, Gap = gap, BLAST = blast, Tree = monophyly)
+
+barcode_res_long <-
+  bind_rows(monophyly_table, blast_table, gap_table) %>%
+  select(-monophyly, -blast, -gap) %>%
+  clean_names() %>%
+  left_join(pretty_names, by = "dataset") %>%
+  mutate(dataset = dataset_pretty) %>%
+  select(-dataset_pretty) %>%
+  mutate(test = str_replace_all(test, "blast", "BLAST"))
+
+get_blast_res <- function(glue_text, ...) {
+  barcode_res_long %>%
+  filter(...) %>%
+  slice(1) %>%
+  mutate(text = glue(glue_text)) %>%
+  pull(text) %>%
+  as.character()
+}
 ```
+
+## Data Validation
+
+We used three methods to evaluate the utility of the DNA barcodes for species identification: barcode gap test, tree (monophyly) test, and BLAST test.
+Any specimens not identified to species were excluded from analysis.
+For the gap test, we first aligned all specimens within each family (classification followed PPG I, with updates for some recently published or revised genera; families with fewer than two samples excluded from analysis), then calculated pairwise distances between all specimens within each family using Kimura’s two-parameter algorithm [K2P\; @Kimura1979].
+Any species with one or more maximum intraspecific distances that exceeded the minimum interspecific distance was considered a failure.
+For the tree test, we first aligned the DNA sequences with MAFFT [@Katoh2002], then inferred a maximum-likelihood phylogeny using IQTREE [@Nguyen2015].
+Outgroup sequences were the same as those used in @Nitta2022b.
+We assessed the monophyly of each species using the MonoPhy R package [@Schwery2016].
+Any species that was not monophyletic was counted as a failure.
+Note that the gap test and tree test can only be used for species that include multiple specimens in our sampling.
+The *trnL-F* region includes intergeneic spacers and its evolutionary rate is too high to reliably align it across all species in our study, which spans all ferns, so we excluded *trnL-F* from the tree test.
+For the BLAST test, we first created a BLAST database for each marker.
+Next, we queried each sequence in turn against the database using the BLAST-n algorithm [@Altschul1997; @Camacho2009].
+We calculated the mean intraspecific percent identity (pident) from the BLAST results of taxa not belonging to species complexes or hybrids and used this as the species level cutoff value.
+Finally, we categorized any BLAST hit where the query sequenced matched a sequence from a different species above the cutoff value for at least 95% of the query sequence length as a failure.
+
+Our initial results suggested that taxa belonging to species complexes and/or hybrids had increased failure rates, so we repeated both tests on datasets that excluded species complexes and hybrids.
+To verify the utility of next-gen DNA sequencing platforms for barcoding ferns, we also analyzed a dataset of *rbcL* sequences that were trimmed to the 950 bp range typically recovered by the MiSeq platform, which is considerably shorter than the full-length *rbcL* sequences obtained by Sanger sequencing (ca. 1,352 bp).
+
+## Technical Validation
+
+Rates of successful species identification ranged from `r get_blast_res("{percent} ({dataset}, {test} test)", percent == min(percent))` to `r get_blast_res("{percent} ({dataset}, {test} test)", percent == max(percent))` (Table 1), in general agreement with reported success rates for *rbcL* (ca. 80%) of ferns from Japan [@Ebihara2010] and Costa Rica [@Nitta2022b].
+The gap test failed to find a barcode gap in many species, in agreement with a study on ferns from Oaxaca, Mexico [@Trujillo-Argueta2021].
+One study from Europe reported a consistent barcode gap across species, but this is likely due to their much smaller sample size [24 species with multiple specimens vs. `r n_species_mult_specimen` in the current study\; @DeGroot2011a].
+*trnL-F* had higher successful species identification rates than *rbcL* in the BLAST test, but not the gap test (Table 1).
+*trnL-F* has greater interspecific and intraspecific variation relative to *rbcl* because the former is a non-coding spacer region, whereas the latter is a protein-coding gene.
+*trnL-F* has been previously shown in studies including smaller sampling of ferns to have higher species identification rates than *rbcL* [@Li2011; @Chen2013a].
+However, *rbcL* is useful as a phylogenetic marker at deeper divergence levels due to its slower rate of evolution, and is the most-frequently sequenced plastid region in ferns [@Nitta2022b] as well as a core DNA barcoding marker in land plants [@Group2008].
+We therefore recommend both regions be used for fern DNA barcoding projects, which can serve to both identify species and expand the phylogenetic sampling of the fern tree of life.
+Analyses using the shorter region of *rbcL* obtained by the MiSeq platform did not show a substantial decrease in species identification rates (Table 1).
+Therefore, massively parallel sequencing of *rbcL* is a promising approach for building barcode libraries.
+
+A marked improvement in species identification rates was observed in datasets with hybrid taxa and species complexes removed, similar to a study in Japan [Table 1\; @Ebihara2010].
+Furthermore, many species complexes and hybrid taxa could not be successfully identified regardless of the test employed (Fig. 2).
+The difficulty of molecularly identifying such taxa is due to the fact that the plastid genome is non-recombining and maternally inherited in ferns [hence, hybrid taxa share identical plastid sequences with their mother\; @Gastony1992; @Vogel1998; @Kuo2018a].
+As ferns have a generally high frequency of hybridization [@Barrington1989], this problem is expected to occur in any DNA barcoding study of ferns with a sufficiently dense sampling that relies on plastid markers.
+While our study demonstrates that plastid markers can be used to successfully identify species in the majority of cases, there will be some taxa that require additional investigation using, e.g., nuclear markers and/or genome-wide approaches.
+
+## Tables
 
 ```{r}
-#| label: blast-test-stats
-
-blast_res_totals <-
-  blast_test_res_raw %>%
-  mutate(result = if_else(fail, "Fail", "Pass")) %>%
-  tabyl(result, dataset) %>%
-  adorn_totals("row")
-
-blast_res_perc <-
-  blast_test_res_raw %>%
-  mutate(result = if_else(fail, "Fail", "Pass")) %>%
-  tabyl(result, dataset) %>%
-  adorn_percentages("col") %>%
-  rename_with(~paste0(.x, "_perc"), !matches("result")) %>%
-  mutate(across(where(is.numeric), ~scales::percent(.x, 0.1)))
-
-blast_res_table <-
-  left_join(blast_res_totals, blast_res_perc, by = "result") %>%
-  mutate(
-    across(contains("_perc"), ~replace_na(.x, "100%")),
-    rbcl = glue("{rbcl} ({rbcl_perc})"),
-    rbcl_no_hybrids = glue("{rbcl_no_hybrids} ({rbcl_no_hybrids_perc})"),
-    trnlf = glue("{trnlf} ({trnlf_perc})"),
-    trnlf_no_hybrids = glue("{trnlf_no_hybrids} ({trnlf_no_hybrids_perc})"),
-    rbcl_short = glue("{rbcl_short} ({rbcl_short_perc})"),
-    rbcl_no_hybrids_short = glue("{rbcl_no_hybrids_short} ({rbcl_no_hybrids_short_perc})")
-  ) %>%
-  select(
-    result, rbcl, rbcl_no_hybrids, rbcl_short,
-    rbcl_no_hybrids_short, trnlf, trnlf_no_hybrids)
-
-blast_res_long <- 
-  blast_test_res_raw %>%
-  group_by(dataset) %>%
-  count(fail) %>%
-  mutate(total = sum(n)) %>%
-  ungroup() %>%
-  mutate(perc = n / total) %>%
-  mutate(perc = scales::percent(perc, 0.1))
-
-blast_res_best <-
-  blast_res_long %>%
-  filter(fail == FALSE) %>%
-  arrange(desc(perc))
+#| label: table-1
+barcoding_res_table
 ```
 
-Rates of successful identification in the BLAST test ranged from _ to _ by dataset.
+**Table 1** Results of barcode tests (frequency of DNA sequences that could be successfully identified to species) by test type and dataset.
+*trnL-F* was not used for the tree-based test since it was not feasible to align DNA sequences for this region across all ferns.
+
+## Figures
+
+**Fig. 2.** Maximum-likelihood *rbcL* phylogeny overlaid with results of the DNA barcode tests and hybrid status.
+Orange indicates hybrid taxa and/or taxa belonging to species complexes.
+Blue indicates taxa (generally, species) that could be successfully identified.
+Red indicates taxa that could not be successfully identified (failures).
+Three barcode tests were used: the gap test, the tree (monophyly) test, and the BLAST test.
+Any taxon that failed at least one test in one of the datasets is counted as a failure.
+For the gap test and tree test, only species with multiple specimens were analyzed.
+For details about each test, see Methods and Technical Validation.

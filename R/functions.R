@@ -826,3 +826,46 @@ calc_barcode_dist <- function(seqs_aligned) {
     select(voucher_1, voucher_2, species_1, species_2, dist, comp_type, dataset) %>%
     assert(not_na, everything())
 }
+
+test_barcode_gap <- function(barcode_dist) {
+
+  min_inter_dist <-
+    barcode_dist %>%
+    filter(comp_type == "inter") %>%
+    select(species_1, species_2, dist, dataset) %>%
+    pivot_longer(names_to = "side", values_to = "species", contains("species")) %>%
+    group_by(species, dataset) %>%
+    slice_min(order_by = dist, n = 1, with_ties = FALSE) %>%
+    ungroup() %>%
+    select(min_inter_dist = dist, dataset, species)
+
+  max_intra_dist <-
+    barcode_dist %>%
+    filter(comp_type == "intra") %>%
+    select(species_1, species_2, dist, dataset) %>%
+    pivot_longer(names_to = "side", values_to = "species", contains("species")) %>%
+    group_by(species, dataset) %>%
+    slice_max(order_by = dist, n = 1, with_ties = FALSE) %>%
+    ungroup() %>%
+    select(max_intra_dist = dist, dataset, species)
+
+  inner_join(
+    min_inter_dist,
+    max_intra_dist,
+    by = c("species", "dataset"),
+    relationship = "one-to-one") %>%
+  assert(not_na, everything()) %>%
+  mutate(fail = min_inter_dist < max_intra_dist) %>%
+  select(dataset, species, min_inter_dist, max_intra_dist, fail)
+
+}
+
+voucher_to_specimen <- function(voucher, sep = " ") {
+  # '__' separates taxon and voucher
+  taxon <- str_split_i(voucher, "__", 1)
+  # '_' separates genus, specific epithet, and infraspecific epithet
+  # eg: "Asplenium_wilfordii_var._densum"
+  genus <- str_split_i(voucher, "_", 1)
+  specific_epithet <- str_split_i(voucher, "_", 2)
+  paste0(genus, sep, specific_epithet)
+}

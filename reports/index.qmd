@@ -22,15 +22,22 @@ library(ggtext)
 ```
 
 ```{r}
+```{r}
+#| label: gap-plot
+
+n_intra_dist <- 
+  barcode_dist %>%
+  filter(comp_type == "intra") %>%
+  pull(species_1) %>%
+  n_distinct()
+
+# Barcode gap plot
 comp_cols <- palette.colors(n = 8, palette = "Okabe-Ito")[c("vermillion", "blue")] %>%
   set_names(c("inter", "intra"))
 
 dist_plot <-
-  barcode_dist %>%
-  mutate(
-    genus_1 = str_split(species_1, " ") %>% map_chr(1),
-    genus_2 = str_split(species_2, " ") %>% map_chr(1)) %>%
-  filter(genus_1 == genus_2) %>%
+  dist_for_plot %>%
+  filter(dataset %in% c("rbcl", "trnlf")) %>%
   ggplot(aes(x = dist, fill = comp_type)) +
   geom_histogram(position = "dodge", binwidth = 0.01) +
   facet_wrap(vars(dataset), scales = "free_y") +
@@ -47,6 +54,9 @@ dist_plot <-
   theme(
     legend.position = "bottom",
     strip.text = element_text(face = "italic"))
+
+ggplot(dist_dot_plot_data, aes(x = intra_dist, y = inter_dist)) +
+  geom_point()
 
 ggsave(plot = dist_plot, file = here::here("results/dist_plot.pdf"))
 ```

@@ -372,6 +372,7 @@ align_seqs <- function(seqs) {
   # remove _R_ appended by mafft
   seq_names <- rownames(alignment)
   seq_names <- stringr::str_remove_all(seq_names, "_R_$")
+  seq_names <- stringr::str_remove_all(seq_names, "^_R_")
   rownames(alignment) <- seq_names
 
   alignment
@@ -386,7 +387,7 @@ get_og_taxa <- function() {
 }
 
 align_with_og <- function(fern_seqs, marker) {
-  
+
   og_taxa <- get_og_taxa()
 
   ftol_seqs <- ftolr::ft_seqs(loci = marker, aligned = FALSE, del_gaps = TRUE)
@@ -399,8 +400,13 @@ align_with_og <- function(fern_seqs, marker) {
 
 # Drop sequences that are not identified to species
 drop_indets <- function(seq_list) {
-  to_drop <- str_detect(names(seq_list), "sp.__")
-  seq_list[!to_drop]
+  # drop `sp.`
+  seq_list <- seq_list[!str_detect(names(seq_list), "sp\\.__")]
+  # drop `aff.`
+  seq_list <- seq_list[!str_detect(names(seq_list), "_aff\\.")]
+  # drop `cf.`
+  seq_list <- seq_list[!str_detect(names(seq_list), "_cf\\.")]
+  return(seq_list)
 }
 
 #' Drop species complexes and hybrids from sequences

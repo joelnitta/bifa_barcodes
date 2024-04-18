@@ -1,60 +1,140 @@
-#' Check monophyly of species in a tree
-#'#'
-#' @param tree Input phylogeny; list of class phylo.
-#' @param outgroup Name of sinlge tip to use as outgroup.
-#' @param sp_delim Character used to separate species name from voucher data
-#' in tree tip labels
-#' @param dataset Name of dataset analyzed
+# Filter data ----
+
+# Drop sequences that are not identified to species
+drop_indets <- function(seq_list) {
+  # drop `sp.`
+  seq_list <- seq_list[!str_detect(names(seq_list), "sp\\.__")]
+  # drop `aff.`
+  seq_list <- seq_list[!str_detect(names(seq_list), "_aff\\.")]
+  # drop `cf.`
+  seq_list <- seq_list[!str_detect(names(seq_list), "_cf\\.")]
+  return(seq_list)
+}
+
+#' Drop species complexes and hybrids from sequences
 #'
-#' @return Dataframe (tibble) with monophyly status for each species
-check_monophy <- function(
-  tree, outgroup = "Zygnema_circumcarinatum", sp_delim = "__", dataset) {
+#' @param seq_list DNA sequences; List of class DNAbin.
+#' @param sp_complex Vector of species names that are species complexes.
+#' @param hybrid_taxa Vector of specimens that are hybrids.
+#'
+#' @return DNA sequences with species complexes and hybrid taxa removed
+drop_complex_hybrids <- function(seq_list, sp_complex, hybrid_taxa) {
+  is_sp_complex <- str_detect(
+    names(seq_list), paste(sp_complex, collapse = "|"))
+  is_hybrid <- names(seq_list) %in% hybrid_taxa
+  assertthat::assert_that(
+    isTRUE(sum(is_hybrid) <= length(hybrid_taxa))
+  )
+  to_drop <- is_sp_complex | is_hybrid
+  seq_list[!to_drop]
+}
 
-  assertthat::assert_that(assertthat::is.string(outgroup))
-  assertthat::assert_that(assertthat::is.string(sp_delim))
+# Sequence alignment ----
 
-  # Get list of outgroup taxa
+align_seqs <- function(seqs) {
+  # Align
+  alignment <- ips::mafft(
+    x = seqs,
+    options = "--adjustdirection",
+    exec = system("which mafft", intern = TRUE)
+  )
+
+  # remove _R_ appended by mafft
+  seq_names <- rownames(alignment)
+  seq_names <- stringr::str_remove_all(seq_names, "_R_$")
+  seq_names <- stringr::str_remove_all(seq_names, "^_R_")
+  rownames(alignment) <- seq_names
+
+  alignment
+
+}
+
+align_with_og <- function(fern_seqs, marker) {
+
   og_taxa <- get_og_taxa()
 
-  # Root tree
-  tree_rooted <-
-    phytools::reroot(
-        tree = tree,
-        node.number = which(tree$tip.label == outgroup)
-      )
+  ftol_seqs <- ftolr::ft_seqs(loci = marker, aligned = FALSE, del_gaps = TRUE)
 
-  # Make dataframe mapping tips to species names
-  taxonomy_data <- tibble(tip = tree_rooted$tip.label) %>%
-    separate_wider_delim(
-      tip,
-      sp_delim,
-      too_many = "drop", too_few = "align_start",
-      names = c("species", "voucher"), cols_remove = FALSE) %>%
-    select(tip, species) %>%
-    as.data.frame()
+  og_seqs <- ftol_seqs[names(ftol_seqs) %in% og_taxa]
 
-  monophy_res <- MonoPhy::AssessMonophyly(tree_rooted, taxonomy = taxonomy_data)
+  # Combine outgroup seqs and fern seqs, align
+  align_seqs(c(og_seqs, fern_seqs))
+}
 
-  monophy_res[[1]]$result %>%
-    rownames_to_column("species") %>%
+# Barcoding gap test ----
+
+calc_barcode_dist <- function(seqs_aligned) {
+  # Calculate distances as matrix
+  seqs_dist <- ape::dist.dna(
+    seqs_aligned, model = "K80", as.matrix = TRUE, pairwise.deletion = TRUE)
+  # set diagonal (self-matches) to NA
+  diag(seqs_dist) <- NaN
+  # set upper triangle (reverse direction match) to NA
+  seqs_dist[upper.tri(seqs_dist)] <- NaN
+  # convert to dataframe
+  as.data.frame(seqs_dist) %>%
+    rownames_to_column("voucher_1") %>%
+    pivot_longer(names_to = "voucher_2", values_to = "dist", -voucher_1) %>%
+    filter(!is.na(dist)) %>%
     as_tibble() %>%
-    filter(!species %in% og_taxa) %>%
-    janitor::clean_names() %>%
-    mutate(dataset = dataset)
+    # extract dataset name
+    separate_wider_delim(
+      cols = voucher_1, delim = "|", names = c("voucher_1", "dataset")) %>%
+    mutate(voucher_2 = str_remove_all(voucher_2, "\\|.*()")) %>%
+    # extract species name and match type
+    mutate(
+      taxon_1 = str_split_i(voucher_1, "__", 1),
+      taxon_2 = str_split_i(voucher_2, "__", 1),
+      genus_1 = str_split_i(voucher_1, "_", 1),
+      genus_2 = str_split_i(voucher_2, "_", 1),
+      specific_epithet_1 = str_split_i(voucher_1, "_", 2),
+      specific_epithet_2 = str_split_i(voucher_2, "_", 2),
+      species_1 = paste(genus_1, specific_epithet_1),
+      species_2 = paste(genus_2, specific_epithet_2),
+      comp_type = case_when(
+        voucher_1 == voucher_2 ~ "self",
+        species_1 == species_2 ~ "intra",
+        species_1 != species_2 ~ "inter"
+      )
+    ) %>%
+    select(voucher_1, voucher_2, species_1, species_2, dist, comp_type, dataset) %>%
+    assert(not_na, everything())
+}
+
+test_barcode_gap <- function(barcode_dist) {
+
+  min_inter_dist <-
+    barcode_dist %>%
+    filter(comp_type == "inter") %>%
+    select(species_1, species_2, dist, dataset) %>%
+    pivot_longer(names_to = "side", values_to = "species", contains("species")) %>%
+    group_by(species, dataset) %>%
+    slice_min(order_by = dist, n = 1, with_ties = FALSE) %>%
+    ungroup() %>%
+    select(min_inter_dist = dist, dataset, species)
+
+  max_intra_dist <-
+    barcode_dist %>%
+    filter(comp_type == "intra") %>%
+    select(species_1, species_2, dist, dataset) %>%
+    pivot_longer(names_to = "side", values_to = "species", contains("species")) %>%
+    group_by(species, dataset) %>%
+    slice_max(order_by = dist, n = 1, with_ties = FALSE) %>%
+    ungroup() %>%
+    select(max_intra_dist = dist, dataset, species)
+
+  inner_join(
+    min_inter_dist,
+    max_intra_dist,
+    by = c("species", "dataset"),
+    relationship = "one-to-one") %>%
+  assert(not_na, everything()) %>%
+  mutate(fail = min_inter_dist < max_intra_dist) %>%
+  select(dataset, species, min_inter_dist, max_intra_dist, fail)
 
 }
 
-#' Write DNA seqeunces to PHYLIP
-#'
-#' @param x Object of class DNAbin.
-#' @param file Path to write sequences.
-#' @param ... Other args not used by this function.
-#'
-#' @return Path to written file
-write_phy <- function(x, file, ...) {
-  ips::write.phy(x = x, file = file, ...)
-  return(file)
-}
+# Monophyly test ----
 
 #' Run IQ-TREE
 #'
@@ -242,71 +322,53 @@ iqtree <- function(alignment = NULL, wd = getwd(),
 
 }
 
-align_seqs <- function(seqs) {
-  # Align
-  alignment <- ips::mafft(
-    x = seqs,
-    options = "--adjustdirection",
-    exec = system("which mafft", intern = TRUE)
-  )
+#' Check monophyly of species in a tree
+#'#'
+#' @param tree Input phylogeny; list of class phylo.
+#' @param outgroup Name of sinlge tip to use as outgroup.
+#' @param sp_delim Character used to separate species name from voucher data
+#' in tree tip labels
+#' @param dataset Name of dataset analyzed
+#'
+#' @return Dataframe (tibble) with monophyly status for each species
+check_monophy <- function(
+  tree, outgroup = "Zygnema_circumcarinatum", sp_delim = "__", dataset) {
 
-  # remove _R_ appended by mafft
-  seq_names <- rownames(alignment)
-  seq_names <- stringr::str_remove_all(seq_names, "_R_$")
-  seq_names <- stringr::str_remove_all(seq_names, "^_R_")
-  rownames(alignment) <- seq_names
+  assertthat::assert_that(assertthat::is.string(outgroup))
+  assertthat::assert_that(assertthat::is.string(sp_delim))
 
-  alignment
-
-}
-
-get_og_taxa <- function() {
-  # get outgroup sequences used by ftol
-  ftolr::accessions_wide %>%
-    filter(outgroup) %>%
-    pull(species)
-}
-
-align_with_og <- function(fern_seqs, marker) {
-
+  # Get list of outgroup taxa
   og_taxa <- get_og_taxa()
 
-  ftol_seqs <- ftolr::ft_seqs(loci = marker, aligned = FALSE, del_gaps = TRUE)
+  # Root tree
+  tree_rooted <-
+    phytools::reroot(
+        tree = tree,
+        node.number = which(tree$tip.label == outgroup)
+      )
 
-  og_seqs <- ftol_seqs[names(ftol_seqs) %in% og_taxa]
+  # Make dataframe mapping tips to species names
+  taxonomy_data <- tibble(tip = tree_rooted$tip.label) %>%
+    separate_wider_delim(
+      tip,
+      sp_delim,
+      too_many = "drop", too_few = "align_start",
+      names = c("species", "voucher"), cols_remove = FALSE) %>%
+    select(tip, species) %>%
+    as.data.frame()
 
-  # Combine outgroup seqs and fern seqs, align
-  align_seqs(c(og_seqs, fern_seqs))
+  monophy_res <- MonoPhy::AssessMonophyly(tree_rooted, taxonomy = taxonomy_data)
+
+  monophy_res[[1]]$result %>%
+    rownames_to_column("species") %>%
+    as_tibble() %>%
+    filter(!species %in% og_taxa) %>%
+    janitor::clean_names() %>%
+    mutate(dataset = dataset)
+
 }
 
-# Drop sequences that are not identified to species
-drop_indets <- function(seq_list) {
-  # drop `sp.`
-  seq_list <- seq_list[!str_detect(names(seq_list), "sp\\.__")]
-  # drop `aff.`
-  seq_list <- seq_list[!str_detect(names(seq_list), "_aff\\.")]
-  # drop `cf.`
-  seq_list <- seq_list[!str_detect(names(seq_list), "_cf\\.")]
-  return(seq_list)
-}
-
-#' Drop species complexes and hybrids from sequences
-#'
-#' @param seq_list DNA sequences; List of class DNAbin.
-#' @param sp_complex Vector of species names that are species complexes.
-#' @param hybrid_taxa Vector of specimens that are hybrids.
-#'
-#' @return DNA sequences with species complexes and hybrid taxa removed
-drop_complex_hybrids <- function(seq_list, sp_complex, hybrid_taxa) {
-  is_sp_complex <- str_detect(
-    names(seq_list), paste(sp_complex, collapse = "|"))
-  is_hybrid <- names(seq_list) %in% hybrid_taxa
-  assertthat::assert_that(
-    isTRUE(sum(is_hybrid) <= length(hybrid_taxa))
-  )
-  to_drop <- is_sp_complex | is_hybrid
-  seq_list[!to_drop]
-}
+# Blast test ----
 
 #' Build a BLAST database.
 #'
@@ -388,11 +450,6 @@ build_blast_db <- function(in_seqs,
   # run command
   processx::run("makeblastdb", arguments, wd = wd, echo = echo)
 
-}
-
-write_fasta <- function(x, file, ...) {
-  ape::write.FASTA(x = x, file = file, ...)
-  file
 }
 
 #' Make a blast database and return paths to the created files
@@ -495,14 +552,15 @@ make_blast_db <- function(seqs_path, blast_db_dir, out_name) {
 #' # Cleanup.
 #' fs::file_delete(temp_dir)
 #' @export
-blast_n <- function(query,
-                     database,
-                     out_file = NULL,
-                     outfmt = "6",
-                     other_args = NULL,
-                     echo = TRUE,
-                     wd,
-                     ...) {
+blast_n <- function(
+  query,
+  database,
+  out_file = NULL,
+  outfmt = "6",
+  other_args = NULL,
+  echo = TRUE,
+  wd,
+  ...) {
 
   # Check input
 
@@ -651,6 +709,34 @@ summarize_blast_fail_rate <- function(blast_test_res_raw) {
     ungroup()
 }
 
+# I/O ----
+
+#' Write DNA seqeunces to PHYLIP
+#'
+#' @param x Object of class DNAbin.
+#' @param file Path to write sequences.
+#' @param ... Other args not used by this function.
+#'
+#' @return Path to written file
+write_phy <- function(x, file, ...) {
+  ips::write.phy(x = x, file = file, ...)
+  return(file)
+}
+
+write_fasta <- function(x, file, ...) {
+  ape::write.FASTA(x = x, file = file, ...)
+  file
+}
+
+# Utils ----
+
+get_og_taxa <- function() {
+  # get outgroup sequences used by ftol
+  ftolr::accessions_wide %>%
+    filter(outgroup) %>%
+    pull(species)
+}
+
 subset_seqs_to_family <- function(seqs, dataset, ppgi) {
   seqs_keep <-
     tibble(seq = names(seqs)) %>%
@@ -674,77 +760,6 @@ subset_seqs_to_family <- function(seqs, dataset, ppgi) {
   names(seqs) <- paste0(names(seqs), "|", dataset)
 
   split(seqs, as.factor(seqs_keep$family))
-}
-
-calc_barcode_dist <- function(seqs_aligned) {
-  # Calculate distances as matrix
-  seqs_dist <- ape::dist.dna(
-    seqs_aligned, model = "K80", as.matrix = TRUE, pairwise.deletion = TRUE)
-  # set diagonal (self-matches) to NA
-  diag(seqs_dist) <- NaN
-  # set upper triangle (reverse direction match) to NA
-  seqs_dist[upper.tri(seqs_dist)] <- NaN
-  # convert to dataframe
-  as.data.frame(seqs_dist) %>%
-    rownames_to_column("voucher_1") %>%
-    pivot_longer(names_to = "voucher_2", values_to = "dist", -voucher_1) %>%
-    filter(!is.na(dist)) %>%
-    as_tibble() %>%
-    # extract dataset name
-    separate_wider_delim(
-      cols = voucher_1, delim = "|", names = c("voucher_1", "dataset")) %>%
-    mutate(voucher_2 = str_remove_all(voucher_2, "\\|.*()")) %>%
-    # extract species name and match type
-    mutate(
-      taxon_1 = str_split_i(voucher_1, "__", 1),
-      taxon_2 = str_split_i(voucher_2, "__", 1),
-      genus_1 = str_split_i(voucher_1, "_", 1),
-      genus_2 = str_split_i(voucher_2, "_", 1),
-      specific_epithet_1 = str_split_i(voucher_1, "_", 2),
-      specific_epithet_2 = str_split_i(voucher_2, "_", 2),
-      species_1 = paste(genus_1, specific_epithet_1),
-      species_2 = paste(genus_2, specific_epithet_2),
-      comp_type = case_when(
-        voucher_1 == voucher_2 ~ "self",
-        species_1 == species_2 ~ "intra",
-        species_1 != species_2 ~ "inter"
-      )
-    ) %>%
-    select(voucher_1, voucher_2, species_1, species_2, dist, comp_type, dataset) %>%
-    assert(not_na, everything())
-}
-
-test_barcode_gap <- function(barcode_dist) {
-
-  min_inter_dist <-
-    barcode_dist %>%
-    filter(comp_type == "inter") %>%
-    select(species_1, species_2, dist, dataset) %>%
-    pivot_longer(names_to = "side", values_to = "species", contains("species")) %>%
-    group_by(species, dataset) %>%
-    slice_min(order_by = dist, n = 1, with_ties = FALSE) %>%
-    ungroup() %>%
-    select(min_inter_dist = dist, dataset, species)
-
-  max_intra_dist <-
-    barcode_dist %>%
-    filter(comp_type == "intra") %>%
-    select(species_1, species_2, dist, dataset) %>%
-    pivot_longer(names_to = "side", values_to = "species", contains("species")) %>%
-    group_by(species, dataset) %>%
-    slice_max(order_by = dist, n = 1, with_ties = FALSE) %>%
-    ungroup() %>%
-    select(max_intra_dist = dist, dataset, species)
-
-  inner_join(
-    min_inter_dist,
-    max_intra_dist,
-    by = c("species", "dataset"),
-    relationship = "one-to-one") %>%
-  assert(not_na, everything()) %>%
-  mutate(fail = min_inter_dist < max_intra_dist) %>%
-  select(dataset, species, min_inter_dist, max_intra_dist, fail)
-
 }
 
 voucher_to_specimen <- function(voucher, sep = " ") {

@@ -1,32 +1,67 @@
 # Filter data ----
 
 # Drop sequences that are not identified to species
-drop_indets <- function(seq_list) {
-  # drop `sp.`
-  seq_list <- seq_list[!str_detect(names(seq_list), "sp\\.__")]
-  # drop `aff.`
-  seq_list <- seq_list[!str_detect(names(seq_list), "_aff\\.")]
-  # drop `cf.`
-  seq_list <- seq_list[!str_detect(names(seq_list), "_cf\\.")]
-  return(seq_list)
+drop_indets <- function(seq_tbl) {
+  seq_tbl %>%
+    # drop `sp.`
+    filter(!str_detect(voucher, "sp\\.__")) %>%
+    # drop `aff.`
+    filter(!str_detect(voucher, "_aff\\.__")) %>%
+    # drop `cf.`
+    filter(!str_detect(voucher, "_cf\\.__"))
 }
 
 #' Drop species complexes and hybrids from sequences
 #'
-#' @param seq_list DNA sequences; List of class DNAbin.
-#' @param sp_complex Vector of species names that are species complexes.
-#' @param hybrid_taxa Vector of specimens that are hybrids.
+#' @param seq_tbl Tibble of DNA sequences; `seq` is list of class DNAbin.
+#' @param hybrid_taxa Tibble of specimens that are hybrids.
+#' @param sp_complex Tibble of species names that are species complexes.
 #'
 #' @return DNA sequences with species complexes and hybrid taxa removed
-drop_complex_hybrids <- function(seq_list, sp_complex, hybrid_taxa) {
-  is_sp_complex <- str_detect(
-    names(seq_list), paste(sp_complex, collapse = "|"))
-  is_hybrid <- names(seq_list) %in% hybrid_taxa
-  assertthat::assert_that(
-    isTRUE(sum(is_hybrid) <= length(hybrid_taxa))
-  )
-  to_drop <- is_sp_complex | is_hybrid
-  seq_list[!to_drop]
+drop_complex_hybrids <- function(seq_tbl, hybrid_taxa, sp_complex) {
+  seq_tbl %>%
+    anti_join(hybrid_taxa, by = "voucher") %>%
+    anti_join(sp_complex, by = "species")
+}
+
+# Metadata ----
+
+add_family <- function(seqs, ppgi) {
+  seqs %>%
+    mutate(
+      genus = str_split_i(species, " ", 1)
+    ) %>%
+    left_join(
+      select(ppgi, genus, family),
+      by = "genus"
+    ) %>%
+    assert(not_na, family) %>%
+    select(-genus)
+}
+
+load_rbcl_og_seqs <- function() {
+
+  og_taxa <- get_og_taxa()
+
+  ftolr::accessions_wide
+
+  ftol_seqs <- ftolr::ft_seqs(loci = "rbcL", aligned = FALSE, del_gaps = TRUE)
+
+  rbcl <- ftol_seqs[names(ftol_seqs) %in% og_taxa] %>%
+    dnabin_to_seqtbl(name_col = "species") %>%
+    left_join(
+      select(ftolr::accessions_wide, species, voucher = plastome),
+      by = "species"
+    ) %>%
+    mutate(
+      voucher = glue::glue("{species}_{voucher}"),
+      species = str_replace_all(species, "_", " "),
+      family = "outgroup",
+      marker = "rbcl"
+    )
+  rbcl_short <- mutate(rbcl, marker = "short")
+  bind_rows(rbcl, rbcl_short)
+
 }
 
 # Sequence alignment ----
@@ -61,43 +96,114 @@ align_with_og <- function(fern_seqs, marker) {
   align_seqs(c(og_seqs, fern_seqs))
 }
 
+#' Align sequences in a tibble
+#'
+#' @param seqtbl Tibble containing one DNA sequence per row
+#' in a list-column
+#' @param name_col Name of column with sequence name
+#' @param seq_col Name of column with sequences (list-column)
+#'
+#' @return Dataframe with aligned sequences. New column logical column "reversed" will
+#' be appended indicating if sequence was reversed when aligning or not.
+#'
+align_seqs_tbl <- function(seqs_tbl, name_col = "accession", seq_col = "seq") {
+  
+  # Need to use quasiquotation for name_col
+  name_col_sym <- ensym(name_col)
+  
+  # Extract sequences, convert to ape DNAbin list
+  seqs <-
+    seqs_tbl %>%
+    # Name column must be unique values
+    assert(is_uniq, !!name_col_sym) %>%
+    seqtbl_to_dnabin(name_col = name_col, seq_col = seq_col)
+
+  # Set aside metadata
+  seqs_data <-
+    select(seqs_tbl, -all_of(seq_col)) %>%
+    # Metadata can't already contain column name "reversed"
+    verify(!"reversed" %in% colnames(.))
+
+  # Align sequences
+  alignment <- ips::mafft(
+    x = seqs,
+    options = "--adjustdirection",
+    exec = "/usr/bin/mafft")
+
+  # Join metadata back to aligned sequences
+  # - make tibble of which seqs were reversed
+  reversed_seqs_tbl <-
+    alignment %>%
+    dnabin_to_seqtbl(name_col = name_col, seq_col = seq_col) %>%
+    # remove '_R_' from species names inserted by mafft
+    select(!!name_col_sym) %>%
+    mutate(reversed = str_detect(!!name_col_sym, "_R_")) %>%
+    mutate(across(-reversed, ~str_remove_all(., "_R_")))
+
+  # - fix names if mafft changed them
+  rownames(alignment) <- str_remove_all(rownames(alignment), "_R_")
+
+  # Join metadata back to aligned sequences
+  alignment %>%
+    dnabin_to_seqtbl(name_col = name_col, seq_col = seq_col) %>%
+    left_join(reversed_seqs_tbl, by = name_col) %>%
+    left_join(seqs_data, by = name_col) %>%
+    assert(not_na, reversed)
+}
+
 # Barcoding gap test ----
 
 calc_barcode_dist <- function(seqs_aligned) {
+
+  dataset <- unique(seqs_aligned$dataset)
+  assertthat::assert_that(assertthat::is.string(dataset))
+
+  marker <- unique(seqs_aligned$marker)
+  assertthat::assert_that(assertthat::is.string(marker))
+
+  seqs_aligned_as_list <- seqtbl_to_dnabin(
+    seqs_aligned, name_col = "voucher")
+
+  seq_lens <- seqs_aligned_as_list %>%
+    map_dbl(length) %>%
+    unique()
+
+  assertthat::assert_that(
+    isTRUE(length(seq_lens) == 1),
+    msg = "Aligned seqs not all the same length."
+  )
+
   # Calculate distances as matrix
-  seqs_dist <- ape::dist.dna(
-    seqs_aligned, model = "K80", as.matrix = TRUE, pairwise.deletion = TRUE)
+  seqs_dist <- 
+    seqs_aligned_as_list %>%
+    as.matrix() %>%
+    ape::dist.dna(model = "K80", as.matrix = TRUE, pairwise.deletion = TRUE)
   # set diagonal (self-matches) to NA
   diag(seqs_dist) <- NaN
   # set upper triangle (reverse direction match) to NA
   seqs_dist[upper.tri(seqs_dist)] <- NaN
+
   # convert to dataframe
   as.data.frame(seqs_dist) %>%
     rownames_to_column("voucher_1") %>%
     pivot_longer(names_to = "voucher_2", values_to = "dist", -voucher_1) %>%
     filter(!is.na(dist)) %>%
     as_tibble() %>%
-    # extract dataset name
-    separate_wider_delim(
-      cols = voucher_1, delim = "|", names = c("voucher_1", "dataset")) %>%
-    mutate(voucher_2 = str_remove_all(voucher_2, "\\|.*()")) %>%
+    # add dataset and marker
+    mutate(dataset = dataset, marker = marker) %>%
     # extract species name and match type
     mutate(
-      taxon_1 = str_split_i(voucher_1, "__", 1),
-      taxon_2 = str_split_i(voucher_2, "__", 1),
-      genus_1 = str_split_i(voucher_1, "_", 1),
-      genus_2 = str_split_i(voucher_2, "_", 1),
-      specific_epithet_1 = str_split_i(voucher_1, "_", 2),
-      specific_epithet_2 = str_split_i(voucher_2, "_", 2),
-      species_1 = paste(genus_1, specific_epithet_1),
-      species_2 = paste(genus_2, specific_epithet_2),
+      species_1 = voucher_to_species(voucher_1),
+      species_2 = voucher_to_species(voucher_2),
       comp_type = case_when(
         voucher_1 == voucher_2 ~ "self",
         species_1 == species_2 ~ "intra",
         species_1 != species_2 ~ "inter"
       )
     ) %>%
-    select(voucher_1, voucher_2, species_1, species_2, dist, comp_type, dataset) %>%
+    select(
+      voucher_1, voucher_2, species_1, species_2,
+      dist, comp_type, marker, dataset) %>%
     assert(not_na, everything())
 }
 
@@ -106,31 +212,33 @@ test_barcode_gap <- function(barcode_dist) {
   min_inter_dist <-
     barcode_dist %>%
     filter(comp_type == "inter") %>%
-    select(species_1, species_2, dist, dataset) %>%
-    pivot_longer(names_to = "side", values_to = "species", contains("species")) %>%
-    group_by(species, dataset) %>%
+    select(species_1, species_2, dist, dataset, marker) %>%
+    pivot_longer(
+      names_to = "side", values_to = "species", contains("species")) %>%
+    group_by(species, dataset, marker) %>%
     slice_min(order_by = dist, n = 1, with_ties = FALSE) %>%
     ungroup() %>%
-    select(min_inter_dist = dist, dataset, species)
+    select(min_inter_dist = dist, dataset, marker, species)
 
   max_intra_dist <-
     barcode_dist %>%
     filter(comp_type == "intra") %>%
-    select(species_1, species_2, dist, dataset) %>%
-    pivot_longer(names_to = "side", values_to = "species", contains("species")) %>%
-    group_by(species, dataset) %>%
+    select(species_1, species_2, dist, dataset, marker) %>%
+    pivot_longer(
+      names_to = "side", values_to = "species", contains("species")) %>%
+    group_by(species, dataset, marker) %>%
     slice_max(order_by = dist, n = 1, with_ties = FALSE) %>%
     ungroup() %>%
-    select(max_intra_dist = dist, dataset, species)
+    select(max_intra_dist = dist, dataset, marker, species)
 
   inner_join(
     min_inter_dist,
     max_intra_dist,
-    by = c("species", "dataset"),
+    by = c("species", "dataset", "marker"),
     relationship = "one-to-one") %>%
   assert(not_na, everything()) %>%
   mutate(fail = min_inter_dist < max_intra_dist) %>%
-  select(dataset, species, min_inter_dist, max_intra_dist, fail)
+  select(marker, dataset, species, min_inter_dist, max_intra_dist, fail)
 
 }
 
@@ -711,6 +819,20 @@ summarize_blast_fail_rate <- function(blast_test_res_raw) {
 
 # I/O ----
 
+read_fasta_to_tbl <- function(
+  path, ...) {
+  ape::read.FASTA(path) %>%
+  dnabin_to_seqtbl(., name_col = "voucher", seq_col = "seq") %>%
+  # add species column
+  mutate(species = voucher_to_species(voucher)) %>%
+  mutate(...)
+}
+
+read_txt_to_tbl <- function(path, col_name = "voucher") {
+  x <- readr::read_lines(path)
+  tibble::tibble("{col_name}" := x)
+}
+
 #' Write DNA seqeunces to PHYLIP
 #'
 #' @param x Object of class DNAbin.
@@ -728,6 +850,40 @@ write_fasta <- function(x, file, ...) {
   file
 }
 
+write_seqtbl_to_phy <- function(
+  seqtbl, file, name_col = "accession", seq_col = "seq") {
+  seqtbl %>%
+    seqtbl_to_dnabin(name_col = name_col, seq_col = seq_col) %>%
+    write_phy(file = file)
+}
+
+write_seqtbl_aln_to_phy <- function(seqtbl, dir) {
+
+  marker <- unique(seqtbl$marker)
+  dataset <- unique(seqtbl$dataset)
+  assertthat::assert_that(assertthat::is.string(marker))
+  assertthat::assert_that(assertthat::is.string(dataset))
+
+  seq_lens <-
+    seqtbl %>%
+    mutate(seq_len = length(seq)) %>%
+    pull(seq_len) %>%
+    unique()
+
+  assertthat::assert_that(
+    isTRUE(length(seq_lens) == 1),
+    msg = "Aligned seqs not all the same length.")
+
+  file <- glue::glue("{marker}_{dataset}") %>%
+    fs::path_ext_set(".phy") %>%
+    fs::path(dir, .)
+
+  seqtbl %>%
+    seqtbl_to_dnabin(name_col = "voucher") %>%
+    as.matrix() %>%
+    write_phy(file = file)
+}
+
 # Utils ----
 
 get_og_taxa <- function() {
@@ -737,32 +893,17 @@ get_og_taxa <- function() {
     pull(species)
 }
 
-subset_seqs_to_family <- function(seqs, dataset, ppgi) {
-  seqs_keep <-
-    tibble(seq = names(seqs)) %>%
-    mutate(
-      genus = str_split(seq, "_") %>% map_chr(1),
-      species = str_split(seq, "__") %>% map_chr(1)
-    ) %>%
-    left_join(ppgi, by = "genus") %>%
-    assert(not_na, genus, family) %>%
-    add_count(family) %>%
+subset_seqs_to_family <- function(seqs) {
+  seqs %>%
+    add_count(family, dataset) %>%
     filter(n > 1) %>%
-    select(-n) %>%
-    group_by(family) %>%
+    group_by(family, dataset) %>%
     mutate(n_species = n_distinct(species)) %>%
     filter(n_species > 1) %>%
     ungroup()
-
-  seqs <-
-    seqs[seqs_keep$seq]
-
-  names(seqs) <- paste0(names(seqs), "|", dataset)
-
-  split(seqs, as.factor(seqs_keep$family))
 }
 
-voucher_to_specimen <- function(voucher, sep = " ") {
+voucher_to_species <- function(voucher, sep = " ") {
   # '__' separates taxon and voucher
   taxon <- str_split_i(voucher, "__", 1)
   # '_' separates genus, specific epithet, and infraspecific epithet
@@ -770,4 +911,53 @@ voucher_to_specimen <- function(voucher, sep = " ") {
   genus <- str_split_i(voucher, "_", 1)
   specific_epithet <- str_split_i(voucher, "_", 2)
   paste0(genus, sep, specific_epithet)
+}
+
+#' Convert DNA sequences from list of class DNAbin to tibble
+#'
+#' @param dnabin List or matrix of class DNAbin
+#' @param name_col Name of column to use for sequence name
+#' @param seq_col Name of column to use for sequences (list-column)
+#' @return Tibble with one row per sequence
+#'
+dnabin_to_seqtbl <- function(dnabin, name_col = "accession", seq_col = "seq") {
+  # Convert to a list in case DNA sequences are aligned (in matrix)
+  dnabin <- as.list(dnabin)
+
+  # Check input
+  assertthat::assert_that(inherits(dnabin, "DNAbin"))
+  assertthat::assert_that(assertthat::is.string(name_col))
+  assertthat::assert_that(assertthat::is.string(seq_col))
+
+  tibble::tibble(
+    "{seq_col}" := split(dnabin, 1:length(dnabin)),
+    "{name_col}" := names(dnabin))
+}
+
+#' Convert a list-column of DNA sequences in a tibble to a list of class DNAbin
+#'
+#' @param seqtbl Tibble containing one DNA sequence per row
+#' in a list-column
+#' @param name_col Name of column with sequence name
+#' @param seq_col Name of column with sequences (list-column)
+#' @return List of class DNAbin
+#'
+seqtbl_to_dnabin <- function(seqtbl, name_col = "accession", seq_col = "seq") {
+  require(ape)
+
+  # Check input
+  assertthat::assert_that(inherits(seqtbl, "tbl"))
+  assertthat::assert_that(assertthat::is.string(name_col))
+  assertthat::assert_that(name_col %in% colnames(seqtbl))
+
+  # Extract sequences from metadata and rename
+  seqs_dnabin <- do.call(c, seqtbl[[seq_col]])
+  names(seqs_dnabin) <- seqtbl[[name_col]]
+
+  # Make sure that went OK
+  assertthat::assert_that(is.list(seqs_dnabin))
+  assertthat::assert_that(inherits(seqs_dnabin, "DNAbin"))
+  assertthat::assert_that(all(names(seqs_dnabin) == seqtbl[[name_col]]))
+
+  seqs_dnabin
 }

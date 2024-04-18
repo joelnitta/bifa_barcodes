@@ -7,35 +7,37 @@ tar_option_set(
 
 tar_plan(
   # Load data ---
-  # - rbcL sequences
-  tar_file_read(
-    rbcl_seqs_all,
-    "data_raw/BIFA_rbcL_analyses_240407.fasta",
-    ape::read.FASTA(!!.x),
+  # DNA sequences
+  tar_file(
+    fern_seq_paths,
+    c(
+      rbcl = "data_raw/BIFA_rbcL_analyses_240407.fasta",
+      rbcl_short = "data_raw/BIFA_rbcL_analyses_240407_barcoding_short.fasta",
+      trnlf = "data_raw/BIFA_trnLF_analyses_240408.fasta"
+    )
   ),
-  # - rbcL sequences (short)
-  tar_file_read(
-    rbcl_seqs_all_short,
-    "data_raw/BIFA_rbcL_analyses_240407_barcoding_short.fasta",
-    ape::read.FASTA(!!.x),
+  fern_seq_paths_map = fern_seq_paths, # work-around to map over fern_seq_paths
+  markers = c("rbcl", "rbcl_short", "trnlf"),
+  tar_target(
+    fern_seqs_raw,
+    read_fasta_to_tbl(fern_seq_paths_map, marker = markers),
+    pattern = map(fern_seq_paths_map, markers)
   ),
-  # - trnLF sequences
-  tar_file_read(
-    trnlf_seqs_all,
-    "data_raw/BIFA_trnLF_analyses_240408.fasta",
-    ape::read.FASTA(!!.x),
-  ),
+  outgroup_seqs = load_rbcl_og_seqs(),
+  seqs_raw = bind_rows(
+    add_family(fern_seqs_raw, ppgi),
+    outgroup_seqs),
   # - hybrid taxa
   tar_file_read(
     hybrid_taxa,
     "data_raw/hybrid_taxa.txt",
-    read_lines(!!.x)
+    read_txt_to_tbl(!!.x, col_name = "voucher")
   ),
   # - species complexes
   tar_file_read(
     sp_complex,
     "data_raw/species_complex.txt",
-    read_lines(!!.x)
+    read_txt_to_tbl(!!.x, col_name = "species")
   ),
   # - PPG I classification system (modified)
   tar_file_read(
@@ -43,84 +45,105 @@ tar_plan(
     "data_raw/ppgi_taxonomy_mod.csv",
     read_csv(!!.x)
   ),
-
-  # Filter data ---
   # - Drop specimens not identified to species
-  rbcl_seqs = drop_indets(rbcl_seqs_all),
-  rbcl_seqs_short = drop_indets(rbcl_seqs_all_short),
-  trnlf_seqs = drop_indets(trnlf_seqs_all),
+  seqs_all = drop_indets(seqs_raw) %>%
+    mutate(dataset = "all"),
   # - Also drop species complexes and hybrids
-  rbcl_seqs_no_hybrids = drop_complex_hybrids(
-    rbcl_seqs, sp_complex, hybrid_taxa),
-  rbcl_seqs_no_hybrids_short = drop_complex_hybrids(
-    rbcl_seqs_short, sp_complex, hybrid_taxa),
-  trnlf_seqs_no_hybrids = drop_complex_hybrids(
-    trnlf_seqs, sp_complex, hybrid_taxa),
-  # - create lists for looping
-  seqs_list = list(
-    rbcl_seqs, rbcl_seqs_no_hybrids,
-    trnlf_seqs, trnlf_seqs_no_hybrids,
-    rbcl_seqs_short, rbcl_seqs_no_hybrids_short),
-  seqs_names = c(
-    "rbcl", "rbcl_no_hybrids",
-    "trnlf", "trnlf_no_hybrids",
-    "rbcl_short", "rbcl_no_hybrids_short"
+  seqs_no_hybrids = drop_complex_hybrids(
+    seqs_all,
+    hybrid_taxa,
+    sp_complex
+  ) %>% mutate(dataset = "no_hybrids"),
+  # - Final unaligned sequences
+  seqs = bind_rows(seqs_all, seqs_no_hybrids) %>%
+    assert(not_na, everything()),
+
+  # DNA alignment ---
+  # - trnlf: subset each set of sequences to families with >1 species per family
+  tar_target(
+    trnlf_to_align,
+    subset_seqs_to_family(filter(seqs, marker == "trnlf")) %>%
+      group_by(family, dataset) %>%
+      tar_group,
+    iteration = "group"
+  ),
+  # trnlf: align within family and dataset
+  tar_target(
+    trnlf_aligned,
+    align_seqs_tbl(trnlf_to_align, name_col = "voucher"),
+    pattern = map(trnlf_to_align),
+    iteration = "vector"
+  ),
+  # rbcl: align without outgroups for gap test
+  tar_target(
+    rbcl_to_align_for_gap_test,
+    filter(seqs, family != "outgroup", str_detect(marker, "rbcl")) %>%
+      subset_seqs_to_family() %>%
+      group_by(marker, family, dataset) %>%
+      tar_group(),
+    iteration = "group"
+  ),
+  tar_target(
+    rbcl_aligned_for_gap_test,
+    align_seqs_tbl(rbcl_to_align_for_gap_test, name_col = "voucher"),
+    pattern = map(rbcl_to_align_for_gap_test),
+    iteration = "vector"
+  ),
+  # rbcl: align with outgroup for monophyly test
+  tar_target(
+    rbcl_to_align_for_monophy_test,
+    filter(seqs, str_detect(marker, "rbcl")) %>%
+      group_by(marker, dataset) %>%
+      tar_group(),
+    iteration = "group"
+  ),
+  tar_target(
+    rbcl_aligned_for_monophy_test,
+    align_seqs_tbl(rbcl_to_align_for_monophy_test, name_col = "voucher"),
+    pattern = map(rbcl_to_align_for_monophy_test),
+    iteration = "vector"
   ),
 
-  # Barcoding gap test ---
-  # - Subset each set of sequences to families with >1 species per family
+  # Barcode gap test ----
+  # - Assemble aligned sequences to test
   tar_target(
-    seqs_by_family,
-    subset_seqs_to_family(
-      seqs_list[[1]],
-      seqs_names,
-      ppgi
-    ),
-    pattern = map(seqs_list, seqs_names)
-  ),
-  # - Align seqs within each family
-  seqs_by_family_for_align = seqs_by_family, # need this to map by family
-  tar_target(
-    seqs_by_family_aligned,
-    align_seqs(seqs_by_family_for_align[[1]]),
-    pattern = map(seqs_by_family_for_align),
-    iteration = "list"
+    seqs_aligned_for_gap_test,
+    bind_rows(
+      trnlf_aligned,
+      rbcl_aligned_for_gap_test) %>%
+      group_by(marker, dataset, family) %>%
+      tar_group(),
+    iteration = "group"
   ),
   # - Calculate barcode marker distances within each family
   tar_target(
     barcode_dist,
-    calc_barcode_dist(seqs_by_family_aligned),
-    pattern = map(seqs_by_family_aligned)
+    calc_barcode_dist(seqs_aligned_for_gap_test),
+    pattern = map(seqs_aligned_for_gap_test)
+  ),
+  tar_target(
+    barcode_dist_grouped,
+    barcode_dist %>%
+      group_by(marker, dataset) %>%
+      tar_group(),
+    iteration = "group"
   ),
   # - Compare maximum intraspecific vs. minimum interspecific distances
   tar_target(
     barcode_gap_res_raw,
-    test_barcode_gap(barcode_dist)
+    test_barcode_gap(barcode_dist_grouped),
+    pattern = map(barcode_dist_grouped)
   ),
 
   # Monophyly test ----
-  # Only do rbcL, since trnLF sequences are too diverged to align
-  # - Prep lists for looping
-  seqs_for_phy_analysis = list(
-    rbcl_seqs, rbcl_seqs_no_hybrids,
-    rbcl_seqs_short, rbcl_seqs_no_hybrids_short
-    ),
-  seqs_phy_names = c(
-    "rbcl", "rbcl_no_hybrids",
-    "rbcl_short", "rbcl_no_hybrids_short"),
-  # - Align sequences with outgroup and write to file
-  tar_target(
-    seqs_for_phy_aligned,
-    align_with_og(seqs_for_phy_analysis[[1]], marker = "rbcL"),
-    pattern = map(seqs_for_phy_analysis)
-  ),
+  # Write alignments to file
   tar_target(
     alignment_files,
-    write_phy(
-      seqs_for_phy_aligned,
-      paste0("_targets/user/iqtree/", seqs_phy_names, ".phy")
+    write_seqtbl_aln_to_phy(
+      rbcl_aligned_for_monophy_test,
+      dir = "_targets/user/iqtree/"
     ),
-    pattern = map(seqs_for_phy_aligned, seqs_phy_names)
+    pattern = map(rbcl_aligned_for_monophy_test)
   ),
   # - Build tree
   tar_target(

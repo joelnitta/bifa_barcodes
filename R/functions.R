@@ -44,49 +44,6 @@ check_monophy <- function(
 
 }
 
-# Convert DNA sequences in DNAbin format to DNAStringSet
-dnabin_to_dnass <- function(dnabin) {
-  temp_file <- tempfile(fileext = ".fasta")
-  ape::write.FASTA(dnabin, temp_file)
-  seq <- Biostrings::readDNAStringSet(temp_file)
-  fs::file_delete(temp_file)
-  seq
-}
-
-analyze_dist <- function(alignment) {
-
-  dist_matrix <-
-    alignment %>%
-    dnabin_to_dnass() %>%
-    DECIPHER::DistanceMatrix()
-
-  diag(dist_matrix) <- NA
-  dist_matrix[upper.tri(dist_matrix)] <- NA
-
-  dist_matrix %>%
-    as.data.frame() %>%
-    rownames_to_column("acc_1") %>%
-    as_tibble() %>%
-    pivot_longer(names_to = "acc_2", values_to = "dist", -acc_1) %>%
-    filter(acc_1 != acc_2) %>%
-    filter(!is.na(dist)) %>%
-    separate_wider_regex(
-      acc_1, c(sp_1 = "^.*?", "__", voucher_1 = ".*")
-    ) %>%
-    separate_wider_regex(
-      acc_2, c(sp_2 = "^.*?", "__", voucher_2 = ".*")
-    ) %>%
-    # assert that all vouchers are different
-    mutate(voucher_check = voucher_1 != voucher_2) %>%
-    assert(in_set(TRUE), voucher_check) %>%
-    select(-voucher_check) %>%
-    mutate(
-      comp_type = if_else(sp_1 == sp_2, "intra", "inter")
-    )
-}
-
-
-
 #' Write DNA seqeunces to PHYLIP
 #'
 #' @param x Object of class DNAbin.

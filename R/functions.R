@@ -4,11 +4,11 @@
 drop_indets <- function(seq_tbl) {
   seq_tbl %>%
     # drop `sp.`
-    filter(!str_detect(voucher, "sp\\.__")) %>%
+    filter(!str_detect(voucher, "_sp_")) %>%
     # drop `aff.`
-    filter(!str_detect(voucher, "_aff\\.__")) %>%
+    filter(!str_detect(voucher, "_aff_")) %>%
     # drop `cf.`
-    filter(!str_detect(voucher, "_cf\\.__"))
+    filter(!str_detect(voucher, "_cf_"))
 }
 
 #' Drop species complexes and hybrids from sequences
@@ -66,6 +66,14 @@ load_rbcl_og_seqs <- function() {
 
 # Sequence alignment ----
 
+remove_mafft_r <- function(alignment) {
+  seq_names <- rownames(alignment)
+  seq_names <- stringr::str_remove_all(seq_names, "_R_$")
+  seq_names <- stringr::str_remove_all(seq_names, "^_R_")
+  rownames(alignment) <- seq_names
+  return(alignment)
+}
+
 align_seqs <- function(seqs) {
   # Align
   alignment <- ips::mafft(
@@ -75,13 +83,7 @@ align_seqs <- function(seqs) {
   )
 
   # remove _R_ appended by mafft
-  seq_names <- rownames(alignment)
-  seq_names <- stringr::str_remove_all(seq_names, "_R_$")
-  seq_names <- stringr::str_remove_all(seq_names, "^_R_")
-  rownames(alignment) <- seq_names
-
-  alignment
-
+  remove_mafft_r(alignment)
 }
 
 align_with_og <- function(fern_seqs, marker) {
@@ -151,9 +153,145 @@ align_seqs_tbl <- function(seqs_tbl, name_col = "accession", seq_col = "seq") {
     assert(not_na, reversed)
 }
 
+concatenate_trnlf_rbcl <- function(
+  rbcl_aligned_to_cat,
+  trnlf_aligned_to_cat) {
+
+  trnlf_aligned_to_cat_dnabin <-
+    trnlf_aligned_to_cat %>%
+    seqtbl_to_dnabin(name_col = "voucher") %>%
+    as.matrix()
+
+  rbcl_aligned_to_cat_dnabin <-
+    rbcl_aligned_to_cat %>%
+    seqtbl_to_dnabin(name_col = "voucher") %>%
+    as.matrix()
+
+  metadata <- bind_rows(
+    select(rbcl_aligned_to_cat, voucher, species, dataset, family),
+    select(trnlf_aligned_to_cat, voucher, species, dataset, family)
+  ) %>%
+    unique() %>%
+    assert(is_uniq, voucher) %>%
+    mutate(marker = "rbcl_trnlf") %>%
+    assert(not_na, everything())
+
+  ape::cbind.DNAbin(
+    rbcl_aligned_to_cat_dnabin,
+    trnlf_aligned_to_cat_dnabin,
+    fill.with.gaps = TRUE) %>%
+    dnabin_to_seqtbl(name_col = "voucher") %>%
+    left_join(metadata, by = "voucher", relationship = "one-to-one") %>%
+    assert(not_na, everything())
+  
+}
+
+#' Merge subalignments with MAFFT
+#'
+#' Modified from ips::mafft.merge(), but allows adding
+# "singleton" seqs that are not part of any subalignment
+#'
+#' @param subMSA List of sub-alignments to merge; each one a matrix of class "DNAbin"
+#' @param other_seqs List of class "DNAbin"; "singleton" sequences that don't belong
+#' to any sub-alignment, but should be merged with the sub-alignments.
+#' @param method Name of method for MAFFT to use
+#' @param gt List of class "phylo"; guide tree
+#' @param thread Number of threads to use
+#' @param exec Path to MAFFT executable
+#' @param quiet Logical; should MAFFT output be printed to screen?
+#' @param adjustdirection Logical; should MAFFT attempt to automatically adjust sequence direction?
+#'
+#' @return Matrix of class "DNAbin"; the merged alignment
+#'
+mafft_merge <- function(subMSA, other_seqs, method = "auto", gt, thread = -1, exec, quiet = TRUE, adjustdirection = FALSE)
+{
+    quiet <- ifelse(quiet, "--quiet", "")
+    adjustdirection <- ifelse(adjustdirection, "--adjustdirection", "")
+    method <- match.arg(method, c("auto", "localpair", "globalpair",
+        "genafpair", "parttree", "retree 1", "retree 2"))
+    method <- paste("--", method, sep = "")
+    if (missing(gt)) {
+        gt <- ""
+    }
+    else {
+        phylo2mafft(gt)
+        gt <- "--treein tree.mafft"
+    }
+    n <- sapply(subMSA, nrow)
+    subMSAtable <- vector(length = length(n))
+    init <- 0
+    for (i in seq_along(n)) {
+        nn <- 1:n[i] + init
+        init <- max(nn)
+        subMSAtable[i] <- paste(nn, collapse = " ")
+    }
+    subMSA <- lapply(subMSA, as.list)
+    subMSA <- c(subMSA, list(other_seqs))
+    subMSA <- do.call(c, subMSA)
+    names(subMSA) <- gsub("^.+[.]", "", names(subMSA))
+    fns <- vector(length = 3)
+    for (i in seq_along(fns)) fns[i] <- tempfile(pattern = "mafft",
+        tmpdir = tempdir())
+    write(subMSAtable, fns[1])
+    ips::write.fas(subMSA, fns[2])
+    call.mafft <- paste(exec, method, "--merge", fns[1], quiet,
+      adjustdirection,
+      gt, "--thread", thread, fns[2], ">", fns[3])
+    system(call.mafft, intern = FALSE, ignore.stdout = FALSE)
+    res <- length(scan(fns[3], what = "c", quiet = TRUE))
+    if (res != 0) {
+        res <- ape::read.FASTA(fns[3])
+        if (length(unique(sapply(res, length))) == 1) {
+            res <- as.matrix(res)
+        }
+    }
+    unlink(fns[file.exists(fns)])
+    return(res)
+}
+
+merge_trnlf <- function(trnlf_seqs, trnlf_aligned_family_grouped) {
+  seqtbl <- trnlf_aligned_family_grouped %>%
+    assert(not_na, voucher) %>%
+    assert(is_uniq, voucher)
+
+  trnlf_singletons <- trnlf_seqs %>%
+    assert(not_na, voucher) %>%
+    assert(is_uniq, voucher) %>%
+    anti_join(seqtbl, by = "voucher") %>%
+    seqtbl_to_dnabin(name_col = "voucher")
+
+  sub_msa_list <-
+    seqtbl %>%
+    group_by(family) %>%
+    nest() %>%
+    mutate(seqs = map(data, ~seqtbl_to_dnabin(.x, name_col = "voucher"))) %>%
+    pull(seqs) %>%
+    map(as.matrix)
+
+  mafft_merge(
+    sub_msa_list, trnlf_singletons, thread = 2,
+    exec = "/usr/bin/mafft", adjustdirection = TRUE) %>%
+    # remove _R_ from sequence names
+    remove_mafft_r() %>%
+    # convert to tbl
+    dnabin_to_seqtbl(name_col = "voucher") %>%
+    # add metadata
+    left_join(
+      select(trnlf_seqs, voucher, species, marker, family, dataset),
+      by = "voucher",
+      relationship = "one-to-one"
+    ) %>%
+    assert(not_na, everything())
+}
+
 # Barcoding gap test ----
 
 calc_barcode_dist <- function(seqs_aligned) {
+
+  # skip calculation if less than two rows (singleton family)
+  if (nrow(seqs_aligned) < 2) {
+    return(tibble())
+  }
 
   dataset <- unique(seqs_aligned$dataset)
   assertthat::assert_that(assertthat::is.string(dataset))
@@ -208,6 +346,17 @@ calc_barcode_dist <- function(seqs_aligned) {
 }
 
 test_barcode_gap <- function(barcode_dist) {
+
+  # skip calculation if less than two rows (singleton family)
+  if (nrow(barcode_dist) < 2) {
+    return(tibble())
+  }
+
+  # skip calculation if lack both "intra" and "inter" comparisons
+  # (need to compare inter vs. intra)
+  if (n_distinct(barcode_dist$comp_type) < 2) {
+    return(tibble())
+  }
 
   min_inter_dist <-
     barcode_dist %>%
@@ -823,6 +972,8 @@ read_fasta_to_tbl <- function(
   path, ...) {
   ape::read.FASTA(path) %>%
   dnabin_to_seqtbl(., name_col = "voucher", seq_col = "seq") %>%
+  # drop periods in sequence names
+  mutate(voucher = str_remove_all(voucher, "\\.")) %>%
   # add species column
   mutate(species = voucher_to_species(voucher)) %>%
   mutate(...)

@@ -2,7 +2,8 @@ source("R/packages.R")
 source("R/functions.R")
 
 tar_option_set(
-  workspace_on_error = TRUE
+  workspace_on_error = TRUE,
+  controller = crew_controller_local(workers = 8)
 )
 
 tar_plan(
@@ -69,7 +70,7 @@ tar_plan(
   ),
   # trnlf: align within family and dataset
   tar_target(
-    trnlf_aligned,
+    trnlf_aligned_family,
     align_seqs_tbl(trnlf_to_align, name_col = "voucher"),
     pattern = map(trnlf_to_align),
     iteration = "vector"
@@ -79,7 +80,7 @@ tar_plan(
     rbcl_to_align_for_gap_test,
     filter(seqs, family != "outgroup", str_detect(marker, "rbcl")) %>%
       subset_seqs_to_family() %>%
-      group_by(marker, family, dataset) %>%
+      group_by(marker, dataset) %>%
       tar_group(),
     iteration = "group"
   ),
@@ -103,6 +104,67 @@ tar_plan(
     pattern = map(rbcl_to_align_for_monophy_test),
     iteration = "vector"
   ),
+  # trnlf: merge subalignments
+  tar_target(
+    trnlf_seqs,
+    filter(seqs, marker == "trnlf") %>%
+      group_by(dataset) %>%
+      tar_group(),
+    iteration = "group"
+  ),
+  tar_target(
+    trnlf_aligned_family_grouped,
+    trnlf_aligned_family %>%
+      group_by(dataset) %>%
+      tar_group(),
+    iteration = "group"
+  ),
+  tar_target(
+    trnlf_aligned,
+    merge_trnlf(trnlf_seqs, trnlf_aligned_family_grouped),
+    pattern = map(trnlf_seqs, trnlf_aligned_family_grouped)
+  ),
+  # concatenate rbcl and trnlf: with outgroups (for monophy test)
+  tar_target(
+    trnlf_aligned_to_cat,
+    trnlf_aligned %>%
+      group_by(dataset) %>%
+      tar_group(),
+    iteration = "group"
+  ),
+  tar_target(
+    rbcl_aligned_to_cat_for_monophy_test,
+    rbcl_aligned_for_monophy_test %>%
+      filter(marker == "rbcl") %>%
+      group_by(dataset) %>%
+      tar_group(),
+    iteration = "group"
+  ),
+  tar_target(
+    rbcl_trnlf_aligned_for_monophy_test,
+    concatenate_trnlf_rbcl(
+      rbcl_aligned_to_cat_for_monophy_test,
+      trnlf_aligned_to_cat
+    ),
+    pattern = map(rbcl_aligned_to_cat_for_monophy_test, trnlf_aligned_to_cat)
+  ),
+  # concatenate rbcl and trnlf: without outgroups (for gap test)
+  tar_target(
+    rbcl_aligned_to_cat_for_gap_test,
+    rbcl_aligned_for_gap_test %>%
+      filter(marker == "rbcl") %>%
+      group_by(dataset) %>%
+      tar_group(),
+    iteration = "group"
+  ),
+  tar_target(
+    rbcl_trnlf_aligned_for_gap_test,
+    concatenate_trnlf_rbcl(
+      rbcl_aligned_to_cat_for_gap_test,
+      trnlf_aligned_to_cat
+    ),
+    pattern = map(rbcl_aligned_to_cat_for_gap_test, trnlf_aligned_to_cat)
+  ),
 
   # Barcode gap test ----
   # - Assemble aligned sequences to test
@@ -110,7 +172,8 @@ tar_plan(
     seqs_aligned_for_gap_test,
     bind_rows(
       trnlf_aligned,
-      rbcl_aligned_for_gap_test) %>%
+      rbcl_aligned_for_gap_test,
+      rbcl_trnlf_aligned_for_gap_test) %>%
       group_by(marker, dataset, family) %>%
       tar_group(),
     iteration = "group"
@@ -121,29 +184,34 @@ tar_plan(
     calc_barcode_dist(seqs_aligned_for_gap_test),
     pattern = map(seqs_aligned_for_gap_test)
   ),
-  tar_target(
-    barcode_dist_grouped,
-    barcode_dist %>%
-      group_by(marker, dataset) %>%
-      tar_group(),
-    iteration = "group"
-  ),
   # - Compare maximum intraspecific vs. minimum interspecific distances
   tar_target(
     barcode_gap_res_raw,
-    test_barcode_gap(barcode_dist_grouped),
-    pattern = map(barcode_dist_grouped)
+    test_barcode_gap(barcode_dist),
+    pattern = map(barcode_dist)
   ),
 
   # Monophyly test ----
+  # Select alignments to test
+  tar_target(
+    alignments_for_monophy_test,
+    bind_rows(
+      rbcl_aligned_for_monophy_test,
+      rbcl_trnlf_aligned_for_monophy_test,
+      trnlf_aligned
+    ) %>%
+    group_by(marker, dataset) %>%
+    tar_group(),
+    iteration = "group"
+  ),
   # Write alignments to file
   tar_target(
     alignment_files,
     write_seqtbl_aln_to_phy(
-      rbcl_aligned_for_monophy_test,
+      alignments_for_monophy_test,
       dir = "_targets/user/iqtree/"
     ),
-    pattern = map(rbcl_aligned_for_monophy_test)
+    pattern = map(alignments_for_monophy_test)
   ),
   # - Build tree
   tar_target(

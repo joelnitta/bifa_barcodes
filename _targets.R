@@ -50,13 +50,13 @@ tar_plan(
   seqs_all = drop_indets(seqs_raw) %>%
     mutate(dataset = "all"),
   # - Also drop species complexes and hybrids
-  seqs_no_hybrids = drop_complex_hybrids(
+  seqs_no_hybrid = drop_complex_hybrids(
     seqs_all,
     hybrid_taxa,
     sp_complex
-  ) %>% mutate(dataset = "no_hybrids"),
+  ) %>% mutate(dataset = "no_hybrid"),
   # - Final unaligned sequences
-  seqs = bind_rows(seqs_all, seqs_no_hybrids) %>%
+  seqs = bind_rows(seqs_all, seqs_no_hybrid) %>%
     assert(not_na, everything()),
 
   # DNA alignment ---
@@ -236,69 +236,99 @@ tar_plan(
   # - Analyze monophyly
   tar_target(
     monophyly_res,
-    check_monophy(barcode_tree, dataset = seqs_phy_names),
-    pattern = map(barcode_tree, seqs_phy_names)
+    check_monophy(barcode_tree, alignment_files),
+    pattern = map(barcode_tree, alignment_files)
   ),
 
   # BLAST test ----
-  # - Write out sequences for BLAST db
+  dataset_names = c("all", "no_hybrid"),
   tar_target(
-    seqs_for_blast_db,
-    write_fasta(
-      ape::del.gaps(seqs_list[[1]]),
-      paste0("_targets/user/blast/", seqs_names, ".fasta")
-    ),
-    format = "file",
-    pattern = map(seqs_list, seqs_names)
+    rbcl_trnlf_pasted_seqs,
+    combine_rbcl_trnlf_seqs(seqs, dataset_select = dataset_names),
+    pattern = map(dataset_names)
   ),
+  # Select sequences (aligned or not doesn't matter) to test
+  tar_target(
+    seqs_for_blast_test,
+    bind_rows(
+      rbcl_trnlf_pasted_seqs,
+      seqs,
+    ) %>%
+    group_by(marker, dataset) %>%
+    tar_group(),
+    iteration = "group"
+  ),
+  # Write seqs to file
+  tar_target(
+    seq_files_for_blast_db,
+    write_seqtbl_to_blast_fasta(
+      seqs_for_blast_test,
+      dir = "_targets/user/blast/"
+    ),
+    pattern = map(seqs_for_blast_test)
+  ),
+
   # - Create BLAST databases
   tar_target(
     blast_db,
     make_blast_db(
-      seqs_path = seqs_for_blast_db,
+      seqs_path = seq_files_for_blast_db,
       blast_db_dir = "_targets/user/blast/",
-      out_name = seqs_names),
+      out_name = format_blast_db_name(seq_files_for_blast_db)),
     format = "file",
-    pattern = map(seqs_for_blast_db, seqs_names)
+    pattern = map(seq_files_for_blast_db)
   ),
   # - Run BLAST query
   tar_target(
     blast_res_tsv,
     blast_n(
-      query = seqs_for_blast_db,
-      database = seqs_names,
-      out_file = paste0(seqs_names, "_blastn_results.tsv"),
+      query = seq_files_for_blast_db,
+      database = format_blast_db_name(seq_files_for_blast_db),
+      out_file = format_blast_output_name(seq_files_for_blast_db),
       wd = "_targets/user/blast/",
       depends = blast_db
     ),
     format = "file",
-    pattern = map(seqs_for_blast_db, seqs_names, blast_db)
+    pattern = map(seq_files_for_blast_db, blast_db)
   ),
   tar_target(
     blast_res_raw,
-    load_blast_tsv(blast_res_tsv, seqs_names),
-    pattern = map(blast_res_tsv, seqs_names)
+    load_blast_tsv(blast_res_tsv),
+    pattern = map(blast_res_tsv)
   ),
   # Filter out matches at < 95% of sequence length,
   # flag intra- vs. inter-specific matches
   tar_target(
+    blast_res_raw_grouped,
+    blast_res_raw %>%
+      group_by(marker, dataset) %>%
+      tar_group(),
+    iteration = "group"
+  ),
+  tar_target(
     blast_res,
-    prep_blast_res(blast_res_raw, seqs_list[[1]]),
-    pattern = map(blast_res_raw, seqs_list)
+    prep_blast_res(blast_res_raw_grouped, seqs_for_blast_test),
+    pattern = map(blast_res_raw_grouped, seqs_for_blast_test)
   ),
   tar_target(
     cutoff_table,
-    get_species_cutoff(blast_res, seqs_names),
-    pattern = map(blast_res, seqs_names)
+    get_species_cutoff(blast_res),
+    pattern = map(blast_res)
+  ),
+  tar_target(
+    cutoff_table_grouped,
+    cutoff_table %>%
+      group_by(marker, dataset) %>%
+      tar_group(),
+    iteration = "group"
   ),
   tar_target(
     blast_test_res_raw,
     test_blast(
       blast_res,
-      dataset_select = seqs_names,
-      cutoff_table
+      cutoff_table_grouped
     ),
-    pattern = map(seqs_names)
+    pattern = map(blast_res, cutoff_table_grouped)
   ),
   blast_fail_rate_summary = summarize_blast_fail_rate(blast_test_res_raw),
   # Write report ----

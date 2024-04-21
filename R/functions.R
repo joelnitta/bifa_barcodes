@@ -59,7 +59,7 @@ load_rbcl_og_seqs <- function() {
       family = "outgroup",
       marker = "rbcl"
     )
-  rbcl_short <- mutate(rbcl, marker = "short")
+  rbcl_short <- mutate(rbcl, marker = "rbcl_short")
   bind_rows(rbcl, rbcl_short)
 
 }
@@ -585,17 +585,29 @@ iqtree <- function(alignment = NULL, wd = getwd(),
 #' @param outgroup Name of sinlge tip to use as outgroup.
 #' @param sp_delim Character used to separate species name from voucher data
 #' in tree tip labels
-#' @param dataset Name of dataset analyzed
+#' @param aln_file Name of alignment file analyzed
 #'
 #' @return Dataframe (tibble) with monophyly status for each species
 check_monophy <- function(
-  tree, outgroup = "Zygnema_circumcarinatum", sp_delim = "__", dataset) {
+  tree, aln_file) {
 
-  assertthat::assert_that(assertthat::is.string(outgroup))
+  sp_delim <- "__"
+  marker <- str_extract(aln_file, "rbcl_trnlf|rbcl_short|trnlf|rbcl")
+  dataset <- str_extract(aln_file, "all|no_hybrid")
+
   assertthat::assert_that(assertthat::is.string(sp_delim))
+  assertthat::assert_that(assertthat::is.string(marker))
+  assertthat::assert_that(assertthat::is.string(dataset))
 
   # Get list of outgroup taxa
   og_taxa <- get_og_taxa()
+
+  # Root on Zygnema for rbcL, Equisetum otherwise
+  outgroup <- if_else(
+    str_detect(marker, "rbcl"),
+    tree$tip.label[str_detect(tree$tip.label, "Zygnema")][1],
+    tree$tip.label[str_detect(tree$tip.label, "Equisetum")][1]
+    )
 
   # Root tree
   tree_rooted <-
@@ -621,11 +633,81 @@ check_monophy <- function(
     as_tibble() %>%
     filter(!species %in% og_taxa) %>%
     janitor::clean_names() %>%
-    mutate(dataset = dataset)
+    mutate(dataset = dataset) %>%
+    mutate(marker = marker)
 
 }
 
 # Blast test ----
+
+#' Combine rbcL and trnL-F sequences
+#'
+#' Any gaps are removed before combining (pasting) sequences
+#'
+#' @param seqs Tibble with DNA sequences as a list-column called "seq".
+#' @param dataset_select Taxon sampling to use; must be "all" or 'no_hybrid'.
+#'
+#' @return Tibble with DNA sequences as a list-column called "seq"; the seq
+#' column includes the rbcL and trnLF sequences pasted together into a single
+#' sequence.
+combine_rbcl_trnlf_seqs <- function(seqs, dataset_select) {
+
+  rbcl <-
+    seqs %>%
+    filter(marker == "rbcl", dataset == dataset_select) %>%
+    mutate(seq = map(seq, ape::del.gaps)) %>%
+    select(rbcl_seq = seq, voucher)
+
+  trnlf <-
+    seqs %>%
+    filter(marker == "trnlf", dataset == dataset_select) %>%
+    mutate(seq = map(seq, ape::del.gaps)) %>%
+    select(trnlf_seq = seq, voucher)
+
+  inner_join(
+      rbcl, trnlf, by = "voucher", relationship = "one-to-one"
+    ) %>%
+    rowwise() %>%
+    mutate(seq = paste_seqs(rbcl_seq, trnlf_seq)) %>%
+    select(seq, voucher) %>%
+    ungroup() %>%
+    mutate(marker = "rbcl_trnlf", dataset = dataset_select)
+}
+
+write_seqtbl_to_blast_fasta <- function(seqs_for_blast_test, dir) {
+  marker <- seqs_for_blast_test %>% pull(marker) %>% unique()
+  dataset <- seqs_for_blast_test %>% pull(dataset) %>% unique()
+  assertthat::assert_that(assertthat::is.string(marker))
+  assertthat::assert_that(assertthat::is.string(dataset))
+
+  file <- glue::glue("{marker}_{dataset}") %>%
+    fs::path_ext_set(".fasta") %>%
+    fs::path(dir, .)
+
+  seqs_for_blast_test %>%
+    seqtbl_to_dnabin(name_col = "voucher") %>%
+    ape::del.gaps() %>%
+    ape::write.FASTA(file = file)
+
+  file
+
+}
+
+format_blast_db_name <- function(file_name) {
+  marker <- str_extract(file_name, "rbcl_trnlf|rbcl_short|trnlf|rbcl")
+  dataset <- str_extract(file_name, "all|no_hybrid")
+  assertthat::assert_that(assertthat::is.string(marker))
+  assertthat::assert_that(assertthat::is.string(dataset))
+  paste(marker, dataset, sep = "_")
+}
+
+format_blast_output_name <- function(file_name) {
+  marker <- str_extract(file_name, "rbcl_trnlf|rbcl_short|trnlf|rbcl")
+  dataset <- str_extract(file_name, "all|no_hybrid")
+  assertthat::assert_that(assertthat::is.string(marker))
+  assertthat::assert_that(assertthat::is.string(dataset))
+  paste(marker, dataset, "blastn_results.tsv", sep = "_")
+}
 
 #' Build a BLAST database.
 #'
@@ -854,12 +936,17 @@ blast_n <- function(
 
 }
 
-load_blast_tsv <- function(blast_out_path, dataset_name) {
+load_blast_tsv <- function(blast_out_path) {
   # Read in sequences.
   # BLAST doesn't output column headers, so we need to specify
   # (make sure they match correctly first!)
   fmt6_cols <- c("qseqid", "sseqid", "pident", "length", "mismatch",
                  "gapopen", "qstart", "qend", "sstart", "send", "evalue", "bitscore")
+
+  marker <- str_extract(blast_out_path, "rbcl_trnlf|rbcl_short|trnlf|rbcl")
+  dataset <- str_extract(blast_out_path, "all|no_hybrid")
+  assertthat::assert_that(assertthat::is.string(marker))
+  assertthat::assert_that(assertthat::is.string(dataset))
 
   # Read in BLAST output
   readr::read_tsv(
@@ -867,10 +954,13 @@ load_blast_tsv <- function(blast_out_path, dataset_name) {
     col_names = fmt6_cols,
     col_types = "ccdddddddddd" # two ID cols are char, rest is numeric
   ) %>%
-  mutate(dataset = dataset_name)
+  mutate(dataset = dataset) %>%
+  mutate(marker = marker)
 }
 
-prep_blast_res <- function(blast_res_raw, q_seqs) {
+prep_blast_res <- function(blast_res_raw, seqs_for_blast_test) {
+
+  q_seqs <- seqtbl_to_dnabin(seqs_for_blast_test, name_col = "voucher")
 
   # Get lengths (bp) of query seqs
   q_seqs <- ape::del.gaps(q_seqs)
@@ -914,54 +1004,49 @@ prep_blast_res <- function(blast_res_raw, q_seqs) {
     )
 }
 
-get_species_cutoff <- function(blast_res, dataset_select) {
+get_species_cutoff <- function(blast_res) {
   blast_res %>%
     filter(comp_type == "intra") %>%
-    filter(dataset == dataset_select) %>%
     summarize(
       mean_pident = mean(pident),
       min_pident = min(pident),
+      marker = unique(marker),
+      dataset = unique(dataset),
       .groups = "drop") %>%
-    mutate(dataset = dataset_select) %>%
     pivot_longer(
       names_to = "cutoff_type",
-      -dataset
+      -c(dataset, marker)
     )
 }
 
 test_blast <- function(
   blast_res,
-  dataset_select, cutoff_table, cutoff_type_select = "mean") {
-
-  # Fix detection of 'rbcl_short'
-  if (str_detect(dataset_select, "short")) {
-    dataset_select_text <- "short"
-  } else {
-    dataset_select_text <- dataset_select
-  }
+  cutoff_table, cutoff_type_select = "mean") {
 
   # Obtain value to use for infraspecific cutoff
   intra_cutoff <-
     cutoff_table %>%
-    filter(str_detect(dataset, "no_hybrids")) %>%
-    filter(str_detect(dataset, dataset_select_text)) %>%
     filter(str_detect(cutoff_type, cutoff_type_select)) %>%
     pull(value)
 
+  assertthat::assert_that(assertthat::is.number(intra_cutoff))
+
   blast_res %>%
-    filter(dataset == dataset_select) %>%
     mutate(
       above_cutoff = pident > intra_cutoff,
       match_other = q_species != s_species,
       fail = above_cutoff & match_other) %>%
     group_by(q_species) %>%
-    summarize(fail = any(fail), .groups = "drop") %>%
-    mutate(dataset = dataset_select)
+    summarize(
+      fail = any(fail),
+      marker = unique(marker),
+      dataset = unique(dataset),
+      .groups = "drop")
 }
 
 summarize_blast_fail_rate <- function(blast_test_res_raw) {
   blast_test_res_raw %>%
-    group_by(dataset) %>%
+    group_by(marker, dataset) %>%
     count(fail) %>%
     ungroup()
 }
@@ -1111,4 +1196,33 @@ seqtbl_to_dnabin <- function(seqtbl, name_col = "accession", seq_col = "seq") {
   assertthat::assert_that(all(names(seqs_dnabin) == seqtbl[[name_col]]))
 
   seqs_dnabin
+}
+
+#' Paste two sequences end to end
+#'
+#' x and y must have the same sequence name
+#'
+#' @param x First sequence; list of class DNAbin of length 1.
+#' @param y Second sequence; list of class DNAbin of length 1.
+#'
+#' @return List of class DNAbin of length 1: x and y pasted together end to end
+#' @examples 
+#' paste_seqs(
+#'   set_names(as.list(woodmouse[1, ]), "a"),
+#'   set_names(as.list(woodmouse[2, ]), "a")
+#' )
+paste_seqs <- function(x, y) {
+  x_char <- as.character(x)[[1]] %>% paste(collapse = "")
+  y_char <- as.character(y)[[1]] %>% paste(collapse = "")
+  assertthat::assert_that(
+    isTRUE(names(x) == names(y))
+  )
+  seq_name <- names(x)
+  
+  combined_char <- paste0(x_char, y_char)
+  res <- combined_char %>%
+    strsplit("") %>%
+    ape::as.DNAbin() %>%
+    set_names(seq_name)
+  list(seq = res)
 }

@@ -168,8 +168,8 @@ concatenate_trnlf_rbcl <- function(
     as.matrix()
 
   metadata <- bind_rows(
-    select(rbcl_aligned_to_cat, voucher, species, dataset, family),
-    select(trnlf_aligned_to_cat, voucher, species, dataset, family)
+    select(rbcl_aligned_to_cat, voucher, species, taxon_sampling, family),
+    select(trnlf_aligned_to_cat, voucher, species, taxon_sampling, family)
   ) %>%
     unique() %>%
     assert(is_uniq, voucher) %>%
@@ -277,7 +277,7 @@ merge_trnlf <- function(trnlf_seqs, trnlf_aligned_family_grouped) {
     dnabin_to_seqtbl(name_col = "voucher") %>%
     # add metadata
     left_join(
-      select(trnlf_seqs, voucher, species, marker, family, dataset),
+      select(trnlf_seqs, voucher, species, marker, family, taxon_sampling),
       by = "voucher",
       relationship = "one-to-one"
     ) %>%
@@ -293,8 +293,8 @@ calc_barcode_dist <- function(seqs_aligned) {
     return(tibble())
   }
 
-  dataset <- unique(seqs_aligned$dataset)
-  assertthat::assert_that(assertthat::is.string(dataset))
+  taxon_sampling <- unique(seqs_aligned$taxon_sampling)
+  assertthat::assert_that(assertthat::is.string(taxon_sampling))
 
   marker <- unique(seqs_aligned$marker)
   assertthat::assert_that(assertthat::is.string(marker))
@@ -327,8 +327,8 @@ calc_barcode_dist <- function(seqs_aligned) {
     pivot_longer(names_to = "voucher_2", values_to = "dist", -voucher_1) %>%
     filter(!is.na(dist)) %>%
     as_tibble() %>%
-    # add dataset and marker
-    mutate(dataset = dataset, marker = marker) %>%
+    # add taxon_sampling and marker
+    mutate(taxon_sampling = taxon_sampling, marker = marker) %>%
     # extract species name and match type
     mutate(
       species_1 = voucher_to_species(voucher_1),
@@ -341,7 +341,7 @@ calc_barcode_dist <- function(seqs_aligned) {
     ) %>%
     select(
       voucher_1, voucher_2, species_1, species_2,
-      dist, comp_type, marker, dataset) %>%
+      dist, comp_type, marker, taxon_sampling) %>%
     assert(not_na, everything())
 }
 
@@ -361,33 +361,33 @@ test_barcode_gap <- function(barcode_dist) {
   min_inter_dist <-
     barcode_dist %>%
     filter(comp_type == "inter") %>%
-    select(species_1, species_2, dist, dataset, marker) %>%
+    select(species_1, species_2, dist, taxon_sampling, marker) %>%
     pivot_longer(
       names_to = "side", values_to = "species", contains("species")) %>%
-    group_by(species, dataset, marker) %>%
+    group_by(species, taxon_sampling, marker) %>%
     slice_min(order_by = dist, n = 1, with_ties = FALSE) %>%
     ungroup() %>%
-    select(min_inter_dist = dist, dataset, marker, species)
+    select(min_inter_dist = dist, taxon_sampling, marker, species)
 
   max_intra_dist <-
     barcode_dist %>%
     filter(comp_type == "intra") %>%
-    select(species_1, species_2, dist, dataset, marker) %>%
+    select(species_1, species_2, dist, taxon_sampling, marker) %>%
     pivot_longer(
       names_to = "side", values_to = "species", contains("species")) %>%
-    group_by(species, dataset, marker) %>%
+    group_by(species, taxon_sampling, marker) %>%
     slice_max(order_by = dist, n = 1, with_ties = FALSE) %>%
     ungroup() %>%
-    select(max_intra_dist = dist, dataset, marker, species)
+    select(max_intra_dist = dist, taxon_sampling, marker, species)
 
   inner_join(
     min_inter_dist,
     max_intra_dist,
-    by = c("species", "dataset", "marker"),
+    by = c("species", "taxon_sampling", "marker"),
     relationship = "one-to-one") %>%
   assert(not_na, everything()) %>%
   mutate(fail = min_inter_dist < max_intra_dist) %>%
-  select(marker, dataset, species, min_inter_dist, max_intra_dist, fail)
+  select(marker, taxon_sampling, species, min_inter_dist, max_intra_dist, fail)
 
 }
 
@@ -593,11 +593,11 @@ check_monophy <- function(
 
   sp_delim <- "__"
   marker <- str_extract(aln_file, "rbcl_trnlf|rbcl_short|trnlf|rbcl")
-  dataset <- str_extract(aln_file, "all|no_hybrid")
+  taxon_sampling <- str_extract(aln_file, "all|no_hybrid")
 
   assertthat::assert_that(assertthat::is.string(sp_delim))
   assertthat::assert_that(assertthat::is.string(marker))
-  assertthat::assert_that(assertthat::is.string(dataset))
+  assertthat::assert_that(assertthat::is.string(taxon_sampling))
 
   # Get list of outgroup taxa
   og_taxa <- get_og_taxa()
@@ -633,7 +633,7 @@ check_monophy <- function(
     as_tibble() %>%
     filter(!species %in% og_taxa) %>%
     janitor::clean_names() %>%
-    mutate(dataset = dataset) %>%
+    mutate(taxon_sampling = taxon_sampling) %>%
     mutate(marker = marker)
 
 }
@@ -645,22 +645,22 @@ check_monophy <- function(
 #' Any gaps are removed before combining (pasting) sequences
 #'
 #' @param seqs Tibble with DNA sequences as a list-column called "seq".
-#' @param dataset_select Taxon sampling to use; must be "all" or 'no_hybrid'.
+#' @param taxon_sampling_select Taxon sampling to use; must be "all" or 'no_hybrid'.
 #'
 #' @return Tibble with DNA sequences as a list-column called "seq"; the seq
 #' column includes the rbcL and trnLF sequences pasted together into a single
 #' sequence.
-combine_rbcl_trnlf_seqs <- function(seqs, dataset_select) {
+combine_rbcl_trnlf_seqs <- function(seqs, taxon_sampling_select) {
 
   rbcl <-
     seqs %>%
-    filter(marker == "rbcl", dataset == dataset_select) %>%
+    filter(marker == "rbcl", taxon_sampling == taxon_sampling_select) %>%
     mutate(seq = map(seq, ape::del.gaps)) %>%
     select(rbcl_seq = seq, voucher)
 
   trnlf <-
     seqs %>%
-    filter(marker == "trnlf", dataset == dataset_select) %>%
+    filter(marker == "trnlf", taxon_sampling == taxon_sampling_select) %>%
     mutate(seq = map(seq, ape::del.gaps)) %>%
     select(trnlf_seq = seq, voucher)
 
@@ -671,16 +671,16 @@ combine_rbcl_trnlf_seqs <- function(seqs, dataset_select) {
     mutate(seq = paste_seqs(rbcl_seq, trnlf_seq)) %>%
     select(seq, voucher) %>%
     ungroup() %>%
-    mutate(marker = "rbcl_trnlf", dataset = dataset_select)
+    mutate(marker = "rbcl_trnlf", taxon_sampling = taxon_sampling_select)
 }
 
 write_seqtbl_to_blast_fasta <- function(seqs_for_blast_test, dir) {
   marker <- seqs_for_blast_test %>% pull(marker) %>% unique()
-  dataset <- seqs_for_blast_test %>% pull(dataset) %>% unique()
+  taxon_sampling <- seqs_for_blast_test %>% pull(taxon_sampling) %>% unique()
   assertthat::assert_that(assertthat::is.string(marker))
-  assertthat::assert_that(assertthat::is.string(dataset))
+  assertthat::assert_that(assertthat::is.string(taxon_sampling))
 
-  file <- glue::glue("{marker}_{dataset}") %>%
+  file <- glue::glue("{marker}_{taxon_sampling}") %>%
     fs::path_ext_set(".fasta") %>%
     fs::path(dir, .)
 
@@ -695,18 +695,18 @@ write_seqtbl_to_blast_fasta <- function(seqs_for_blast_test, dir) {
 
 format_blast_db_name <- function(file_name) {
   marker <- str_extract(file_name, "rbcl_trnlf|rbcl_short|trnlf|rbcl")
-  dataset <- str_extract(file_name, "all|no_hybrid")
+  taxon_sampling <- str_extract(file_name, "all|no_hybrid")
   assertthat::assert_that(assertthat::is.string(marker))
-  assertthat::assert_that(assertthat::is.string(dataset))
-  paste(marker, dataset, sep = "_")
+  assertthat::assert_that(assertthat::is.string(taxon_sampling))
+  paste(marker, taxon_sampling, sep = "_")
 }
 
 format_blast_output_name <- function(file_name) {
   marker <- str_extract(file_name, "rbcl_trnlf|rbcl_short|trnlf|rbcl")
-  dataset <- str_extract(file_name, "all|no_hybrid")
+  taxon_sampling <- str_extract(file_name, "all|no_hybrid")
   assertthat::assert_that(assertthat::is.string(marker))
-  assertthat::assert_that(assertthat::is.string(dataset))
-  paste(marker, dataset, "blastn_results.tsv", sep = "_")
+  assertthat::assert_that(assertthat::is.string(taxon_sampling))
+  paste(marker, taxon_sampling, "blastn_results.tsv", sep = "_")
 }
 
 #' Build a BLAST database.
@@ -944,9 +944,9 @@ load_blast_tsv <- function(blast_out_path) {
                  "gapopen", "qstart", "qend", "sstart", "send", "evalue", "bitscore")
 
   marker <- str_extract(blast_out_path, "rbcl_trnlf|rbcl_short|trnlf|rbcl")
-  dataset <- str_extract(blast_out_path, "all|no_hybrid")
+  taxon_sampling <- str_extract(blast_out_path, "all|no_hybrid")
   assertthat::assert_that(assertthat::is.string(marker))
-  assertthat::assert_that(assertthat::is.string(dataset))
+  assertthat::assert_that(assertthat::is.string(taxon_sampling))
 
   # Read in BLAST output
   readr::read_tsv(
@@ -954,7 +954,7 @@ load_blast_tsv <- function(blast_out_path) {
     col_names = fmt6_cols,
     col_types = "ccdddddddddd" # two ID cols are char, rest is numeric
   ) %>%
-  mutate(dataset = dataset) %>%
+  mutate(taxon_sampling = taxon_sampling) %>%
   mutate(marker = marker)
 }
 
@@ -1011,11 +1011,11 @@ get_species_cutoff <- function(blast_res) {
       mean_pident = mean(pident),
       min_pident = min(pident),
       marker = unique(marker),
-      dataset = unique(dataset),
+      taxon_sampling = unique(taxon_sampling),
       .groups = "drop") %>%
     pivot_longer(
       names_to = "cutoff_type",
-      -c(dataset, marker)
+      -c(taxon_sampling, marker)
     )
 }
 
@@ -1040,13 +1040,13 @@ test_blast <- function(
     summarize(
       fail = any(fail),
       marker = unique(marker),
-      dataset = unique(dataset),
+      taxon_sampling = unique(taxon_sampling),
       .groups = "drop")
 }
 
 summarize_blast_fail_rate <- function(blast_test_res_raw) {
   blast_test_res_raw %>%
-    group_by(marker, dataset) %>%
+    group_by(marker, taxon_sampling) %>%
     count(fail) %>%
     ungroup()
 }
@@ -1096,9 +1096,9 @@ write_seqtbl_to_phy <- function(
 write_seqtbl_aln_to_phy <- function(seqtbl, dir) {
 
   marker <- unique(seqtbl$marker)
-  dataset <- unique(seqtbl$dataset)
+  taxon_sampling <- unique(seqtbl$taxon_sampling)
   assertthat::assert_that(assertthat::is.string(marker))
-  assertthat::assert_that(assertthat::is.string(dataset))
+  assertthat::assert_that(assertthat::is.string(taxon_sampling))
 
   seq_lens <-
     seqtbl %>%
@@ -1110,7 +1110,7 @@ write_seqtbl_aln_to_phy <- function(seqtbl, dir) {
     isTRUE(length(seq_lens) == 1),
     msg = "Aligned seqs not all the same length.")
 
-  file <- glue::glue("{marker}_{dataset}") %>%
+  file <- glue::glue("{marker}_{taxon_sampling}") %>%
     fs::path_ext_set(".phy") %>%
     fs::path(dir, .)
 
@@ -1131,9 +1131,9 @@ get_og_taxa <- function() {
 
 subset_seqs_to_family <- function(seqs) {
   seqs %>%
-    add_count(family, dataset) %>%
+    add_count(family, taxon_sampling) %>%
     filter(n > 1) %>%
-    group_by(family, dataset) %>%
+    group_by(family, taxon_sampling) %>%
     mutate(n_species = n_distinct(species)) %>%
     filter(n_species > 1) %>%
     ungroup()

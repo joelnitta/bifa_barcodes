@@ -15,17 +15,14 @@ targets::tar_load(
   c(
     barcode_dist,
     monophyly_res,
-    rbcl_seqs,
-    trnlf_seqs,
-    rbcl_seqs_no_hybrids,
-    trnlf_seqs_no_hybrids,
     barcode_gap_res_raw,
     blast_test_res_raw,
-    # tree plot
     barcode_tree,
-    seqs_names,
+    alignment_files,
     sp_complex,
-    hybrid_taxa),
+    hybrid_taxa,
+    seqs_raw,
+    ppgi),
   store = here::here("_targets/"))
 
 source(here::here("R/packages.R"))
@@ -35,34 +32,120 @@ library(glue)
 library(janitor)
 library(ggtext)
 library(ggtree)
+library(ggnewscale)
 ```
 
 ```{r}
 #| label: tree-plot
 
 # extract tree from list
-rbcl_tree <- barcode_tree[seqs_names == "rbcl"][[1]]
+marker <- str_extract(alignment_files, "rbcl_trnlf|rbcl_short|trnlf|rbcl")
+taxon_sampling <- str_extract(alignment_files, "all|no_hybrid")
 
+tree_selection <- which(marker == "rbcl_trnlf" & taxon_sampling == "all")
+assertthat::assert_that(assertthat::is.number(tree_selection))
+
+tree_to_plot <- barcode_tree[[tree_selection]]
+
+# Root tree
+outgroup <- tree_to_plot$tip.label[
+  str_detect(tree_to_plot$tip.label, "Zygnema")]
+assertthat::assert_that(assertthat::is.string(outgroup))
+
+tree_to_plot <-
+  phytools::reroot(
+      tree = tree_to_plot,
+      node.number = which(tree_to_plot$tip.label == outgroup)
+    )
+
+# Make data frame matching tree tips to species names
 tree_tip_species <-
-  tibble(tip = rbcl_tree$tip.label) %>%
-  mutate(species = voucher_to_specimen(tip, "_"))
+  tibble(tip = tree_to_plot$tip.label) %>%
+  mutate(species = voucher_to_species(tip, "_"))
 
-# hybrid taxa
+# Compile taxonomy data for labeling clades
+taxonomy_summary <-
+  seqs_raw %>%
+  distinct(tip = voucher, family) %>%
+  left_join(
+    unique(select(ppgi, family, suborder, order)),
+    by = "family",
+    relationship = "many-to-one"
+  ) %>%
+  mutate(major_clade = case_when(
+    family == "outgroup" ~ "outgroup",
+    order == "Polypodiales" ~ suborder,
+    .default = order
+  )) %>%
+  select(tip, major_clade) %>%
+  assert(not_na, everything()) %>%
+  inner_join(select(tree_tip_species, tip), by = "tip")
+
+clade_cols <- tribble(
+  ~major_clade, ~color_name,
+  "Polypodiineae", "amethyst",
+  "Aspleniineae", "blue",
+  "Pteridineae", "damson",
+  "Dennstaedtiineae", "caramel",
+  "Lindsaeineae", "green",
+  "Cyatheales", "mallow",
+  "Salviniales", "navy",
+  "Schizaeales", "pink",
+  "Hymenophyllales", "red",
+  "Gleicheniales", "sky",
+  "Osmundales", "turquoise",
+  "Ophioglossales", "violet",
+  "Marattiales", "uranium"
+) %>%
+  inner_join(
+    tibble(
+      color_name = names(Polychrome::green.armytage.colors()),
+      color = Polychrome::green.armytage.colors()
+    ),
+    by = "color_name",
+    relationship = "one-to-one"
+  ) %>%
+  mutate(plot_order = seq_len(nrow(.)))
+
+clade_tibble <- MonoPhy::AssessMonophyly(
+  tree_to_plot,
+  as.data.frame(taxonomy_summary)) %>%
+  MonoPhy::GetResultMonophyly() %>%
+    magrittr::extract2(1) %>%
+    rownames_to_column("major_clade") %>%
+    as_tibble() %>%
+    janitor::clean_names() %>%
+  mutate(mrca = parse_number(mrca)) %>%
+  filter(major_clade != "outgroup", monophyly != "Monotypic") %>%
+  verify(all(monophyly == "Yes")) %>%
+  mutate(
+    major_clade,
+    major_clade_letter = str_sub(major_clade, 1, 2),
+    mrca, .keep = "used") %>%
+  assert(is_uniq, major_clade_letter) %>%
+  left_join(clade_cols, relationship = "one-to-one", by = "major_clade") %>%
+  mutate(major_clade = fct_reorder(major_clade, plot_order)) %>%
+  mutate(major_clade_letter = fct_reorder(major_clade_letter, plot_order)) %>%
+  arrange(major_clade)
+
+# Compile hybrid taxa data
 hybrid_taxa_data <-
   tree_tip_species %>%
   mutate(
     hybrid_taxon = case_when(
-      species %in% sp_complex ~ "Hybrid",
-      tip %in% hybrid_taxa ~ "Hybrid",
+      species %in% sp_complex$species ~ "Hybrid",
+      tip %in% hybrid_taxa$voucher ~ "Hybrid",
       .default = "not_hybrid"
     )
   ) %>%
-  select(tip, hybrid_taxon)
+  select(tip, hybrid_taxon) %>%
+  assert(not_na, everything())
 
-# monophyly test (requires infrasp sampling)
-monophy_test_all_markers <-
+# Compile monophyly test data
+monophy_test_species_summary <-
   monophyly_res %>%
   filter(monophyly != "Monotypic") %>%
+  filter(taxon_sampling == "all", marker == "rbcl_trnlf") %>%
   group_by(species) %>%
   summarize(
     monophy_test = any(monophyly %in% "No") %>%
@@ -72,13 +155,14 @@ monophy_test_all_markers <-
 monophy_tree_data <-
   tree_tip_species %>%
   left_join(
-    monophy_test_all_markers, by = "species", relationship = "many-to-one") %>%
+    monophy_test_species_summary, by = "species", relationship = "many-to-one") %>%
   mutate(monophy_test = replace_na(monophy_test, "NA")) %>%
   select(tip, monophy_test)
 
-# gap test (requires infrasp sampling)
-gap_test_all_markers <-
+# Compile gap test data
+gap_test_species_summary <-
   barcode_gap_res_raw %>%
+  filter(taxon_sampling == "all", marker == "rbcl_trnlf") %>%
   group_by(species) %>%
   summarize(
     gap_test = any(fail) %>%
@@ -89,13 +173,14 @@ gap_test_all_markers <-
 gap_tree_data <-
   tree_tip_species %>%
   left_join(
-    gap_test_all_markers, by = "species", relationship = "many-to-one") %>%
+    gap_test_species_summary, by = "species", relationship = "many-to-one") %>%
   mutate(gap_test = replace_na(gap_test, "NA")) %>%
   select(tip, gap_test)
 
-# blast test (all samples)
-blast_test_all_markers <-
+# Compile blast test data
+blast_test_species_summary <-
   blast_test_res_raw %>%
+  filter(taxon_sampling == "all", marker == "rbcl_trnlf") %>%
   rename(species = q_species) %>%
   group_by(species) %>%
   summarize(
@@ -107,10 +192,11 @@ blast_test_all_markers <-
 blast_tree_data <-
   tree_tip_species %>%
   left_join(
-    blast_test_all_markers, by = "species", relationship = "many-to-one") %>%
+    blast_test_species_summary, by = "species", relationship = "many-to-one") %>%
   mutate(blast_test = replace_na(blast_test, "NA")) %>%
   select(tip, blast_test)
 
+# Join datasets for plotting
 tree_plot_data <-
   hybrid_taxa_data %>%
   left_join(gap_tree_data, by = "tip", relationship = "one-to-one") %>%
@@ -123,7 +209,9 @@ tree_plot_data <-
     BLAST = blast_test) %>%
   column_to_rownames("tip")
 
-circ_tree <- ggtree(rbcl_tree, layout = "fan", open.angle = 10, size = 0.3)
+# Make plot
+
+circ_tree <- ggtree(tree_to_plot, layout = "fan", open.angle = 10, size = 0.3)
 
 oi_cols <- palette.colors(n = 9, palette = "Okabe-Ito")
 
@@ -139,6 +227,10 @@ heatmap_col_labels <- c(
   "Pass", "Fail", "Hybrid", NULL, "NA"
 )
 
+clade_cols <- clade_tibble %>%
+  pull(color) %>%
+  set_names(clade_tibble$major_clade)
+
 plot <- gheatmap(
     p = circ_tree, 
     data = tree_plot_data,
@@ -146,8 +238,26 @@ plot <- gheatmap(
     colnames_offset_y = 0.25,
     width = 0.3,
     hjust = 1) +
-  scale_fill_manual(values = heatmap_cols, breaks = c("Pass", "Fail", "Hybrid", "NA")) +
-  theme(legend.title = element_blank())
+  scale_fill_manual(
+    values = heatmap_cols,
+    breaks = c("Pass", "Fail", "Hybrid", "NA")) +
+  geom_cladelab(
+    data = clade_tibble,
+    barsize = 1,
+    textcolour = "black",
+    align = TRUE,
+    #offset.text = -0.1,
+    offset = 0.8,
+    offset.text = 0.2,
+    mapping = aes(
+      node = mrca,
+      label = major_clade_letter,
+      color = major_clade)
+  ) +
+  scale_color_manual(values = clade_cols) +
+  theme(
+    legend.title = element_blank(),
+    legend.position = "right")
 
 ggsave(
   plot = plot,
@@ -167,17 +277,20 @@ n_species_mult_specimen <-
 # Barcode test results
 pretty_names <- tribble(
   ~dataset, ~dataset_pretty, ~order,
-  "rbcl", "*rbcL*", 1,
-  "rbcl_no_hybrids", "*rbcL*, no hybrids", 2,
-  "rbcl_short", "*rbcL*, short", 3,
-  "rbcl_no_hybrids_short", "*rbcL*, short, no hybrids", 4,
-  "trnlf", "*trnL-F*", 5,
-  "trnlf_no_hybrids", "*trnL-F*, no hybrids", 6
+  "all rbcl_short", "*rbcL* (short)", 1,
+  "all rbcl", "*rbcL*", 2,
+  "all trnlf", "*trnL-F*", 3,
+  "all rbcl_trnlf", "*rbcL* + *trnL-F*", 4,
+  "no_hybrid rbcl_short", "*rbcL* (short), no hybrids", 5,
+  "no_hybrid rbcl", "*rbcL*, no hybrids", 6,
+  "no_hybrid trnlf", "*trnL-F*, no hybrids", 7,
+  "no_hybrid rbcl_trnlf", "*rbcL* + *trnL-F*, no hybrids", 8
 )
 
 gap_table <-
   barcode_gap_res_raw %>%
   mutate(result = if_else(fail, "Fail", "Pass")) %>%
+  mutate(dataset = paste(taxon_sampling, marker)) %>%
   tabyl(dataset, result) %>%
   adorn_totals("col") %>%
   mutate(
@@ -189,6 +302,7 @@ gap_table <-
 monophyly_table <-
   monophyly_res %>%
   filter(monophyly != "Monotypic") %>%
+  mutate(dataset = paste(taxon_sampling, marker)) %>%
   tabyl(dataset, monophyly) %>%
   rename(Pass = Yes, Fail = No) %>%
   adorn_totals("col") %>%
@@ -201,6 +315,7 @@ monophyly_table <-
 blast_table <-
   blast_test_res_raw %>%
   mutate(result = if_else(fail, "Fail", "Pass")) %>%
+  mutate(dataset = paste(taxon_sampling, marker)) %>%
   tabyl(dataset, result) %>%
   adorn_totals("col") %>%
   mutate(
@@ -247,21 +362,25 @@ get_blast_res <- function(glue_text, ...) {
 
 We used three methods to evaluate the utility of the DNA barcodes for species identification: barcode gap test, tree (monophyly) test, and BLAST test.
 Any specimens not identified to species were excluded from analysis.
-For the gap test, we first aligned all specimens within each family (classification followed PPG I, with updates for some recently published or revised genera; families with fewer than two samples excluded from analysis), then calculated pairwise distances between all specimens within each family using Kimura’s two-parameter algorithm [K2P\; @Kimura1979].
+For the gap test, we first aligned all specimens within each family using MAFFT [@Katoh2002].
+Classification followed PPG I, with updates for some recently published or revised genera; families with fewer than two samples excluded from analysis. 
+We then calculated pairwise distances between all specimens within each family using Kimura’s two-parameter algorithm [K2P\; @Kimura1979].
 Any species with one or more maximum intraspecific distances that exceeded the minimum interspecific distance was considered a failure.
-For the tree test, we first aligned the DNA sequences with MAFFT [@Katoh2002], then inferred a maximum-likelihood phylogeny using IQTREE [@Nguyen2015].
+For the tree test, we first aligned the DNA sequences with MAFFT. 
+The *trnL-F* region includes intergeneic spacers and its evolutionary rate is too high to reliably align it across all species in our study, which spans all ferns, so we first conducted alignment within each family, then merged the family-level alignments into a single alignment using the MAFFT `--merge` argument [@Nitta2022b].
+We then inferred a maximum-likelihood phylogeny using IQTREE [@Nguyen2015].
 Outgroup sequences were the same as those used in @Nitta2022b.
 We assessed the monophyly of each species using the MonoPhy R package [@Schwery2016].
 Any species that was not monophyletic was counted as a failure.
-Note that the gap test and tree test can only be used for species that include multiple specimens in our sampling.
-The *trnL-F* region includes intergeneic spacers and its evolutionary rate is too high to reliably align it across all species in our study, which spans all ferns, so we excluded *trnL-F* from the tree test.
 For the BLAST test, we first created a BLAST database for each marker.
 Next, we queried each sequence in turn against the database using the BLAST-n algorithm [@Altschul1997; @Camacho2009].
-We calculated the mean intraspecific percent identity (pident) from the BLAST results of taxa not belonging to species complexes or hybrids and used this as the species level cutoff value.
+We calculated the mean intraspecific percent identity (pident) from the BLAST results and used this as the species level cutoff value.
 Finally, we categorized any BLAST hit where the query sequenced matched a sequence from a different species above the cutoff value for at least 95% of the query sequence length as a failure.
+Note that the gap test and tree test can only be used for species that include multiple specimens in our sampling.
 
-Our initial results suggested that taxa belonging to species complexes and/or hybrids had increased failure rates, so we repeated both tests on datasets that excluded species complexes and hybrids.
+Our initial results suggested that taxa belonging to species complexes and/or hybrids had increased failure rates, so we repeated all tests on datasets that excluded species complexes and hybrids.
 To verify the utility of next-gen DNA sequencing platforms for barcoding ferns, we also analyzed a dataset of *rbcL* sequences that were trimmed to the 950 bp range typically recovered by the MiSeq platform, which is considerably shorter than the full-length *rbcL* sequences obtained by Sanger sequencing (ca. 1,352 bp).
+We also conducted the tests on combined full-length *rbcL* + *trnL-F* sequences, resulting in a total of eight datasets: four markers (*rbcL*, *rbcL* short, *trnL-F*, *rbcL* + *trnL-F*) across two taxon sampling schemes (all taxa, or exluding hybrids and species complexes).
 
 ## Technical Validation
 
@@ -290,15 +409,14 @@ barcoding_res_table
 ```
 
 **Table 1** Results of barcode tests (frequency of DNA sequences that could be successfully identified to species) by test type and dataset.
-*trnL-F* was not used for the tree-based test since it was not feasible to align DNA sequences for this region across all ferns.
 
 ## Figures
 
-**Fig. 2.** Maximum-likelihood *rbcL* phylogeny overlaid with results of the DNA barcode tests and hybrid status.
+**Fig. 2.** Maximum-likelihood *rbcL* + *trnL-F* phylogeny overlaid with results of the DNA barcode tests and hybrid status from the *rbcL* + *trnL-F* dataset.
 Orange indicates hybrid taxa and/or taxa belonging to species complexes.
 Blue indicates taxa (generally, species) that could be successfully identified.
 Red indicates taxa that could not be successfully identified (failures).
 Three barcode tests were used: the gap test, the tree (monophyly) test, and the BLAST test.
-Any taxon that failed at least one test in one of the datasets is counted as a failure.
+Any taxon with a specimen that failed at least one test is counted as a failure.
 For the gap test and tree test, only species with multiple specimens were analyzed.
 For details about each test, see Methods and Technical Validation.

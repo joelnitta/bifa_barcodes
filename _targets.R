@@ -48,13 +48,13 @@ tar_plan(
   ),
   # - Drop specimens not identified to species
   seqs_all = drop_indets(seqs_raw) %>%
-    mutate(dataset = "all"),
+    mutate(taxon_sampling = "all"),
   # - Also drop species complexes and hybrids
   seqs_no_hybrid = drop_complex_hybrids(
     seqs_all,
     hybrid_taxa,
     sp_complex
-  ) %>% mutate(dataset = "no_hybrid"),
+  ) %>% mutate(taxon_sampling = "no_hybrid"),
   # - Final unaligned sequences
   seqs = bind_rows(seqs_all, seqs_no_hybrid) %>%
     assert(not_na, everything()),
@@ -64,11 +64,11 @@ tar_plan(
   tar_target(
     trnlf_to_align,
     subset_seqs_to_family(filter(seqs, marker == "trnlf")) %>%
-      group_by(family, dataset) %>%
+      group_by(family, taxon_sampling) %>%
       tar_group,
     iteration = "group"
   ),
-  # trnlf: align within family and dataset
+  # trnlf: align within family and taxon_sampling
   tar_target(
     trnlf_aligned_family,
     align_seqs_tbl(trnlf_to_align, name_col = "voucher"),
@@ -80,7 +80,7 @@ tar_plan(
     rbcl_to_align_for_gap_test,
     filter(seqs, family != "outgroup", str_detect(marker, "rbcl")) %>%
       subset_seqs_to_family() %>%
-      group_by(marker, dataset) %>%
+      group_by(marker, taxon_sampling) %>%
       tar_group(),
     iteration = "group"
   ),
@@ -94,7 +94,7 @@ tar_plan(
   tar_target(
     rbcl_to_align_for_monophy_test,
     filter(seqs, str_detect(marker, "rbcl")) %>%
-      group_by(marker, dataset) %>%
+      group_by(marker, taxon_sampling) %>%
       tar_group(),
     iteration = "group"
   ),
@@ -108,14 +108,14 @@ tar_plan(
   tar_target(
     trnlf_seqs,
     filter(seqs, marker == "trnlf") %>%
-      group_by(dataset) %>%
+      group_by(taxon_sampling) %>%
       tar_group(),
     iteration = "group"
   ),
   tar_target(
     trnlf_aligned_family_grouped,
     trnlf_aligned_family %>%
-      group_by(dataset) %>%
+      group_by(taxon_sampling) %>%
       tar_group(),
     iteration = "group"
   ),
@@ -128,7 +128,7 @@ tar_plan(
   tar_target(
     trnlf_aligned_to_cat,
     trnlf_aligned %>%
-      group_by(dataset) %>%
+      group_by(taxon_sampling) %>%
       tar_group(),
     iteration = "group"
   ),
@@ -136,7 +136,7 @@ tar_plan(
     rbcl_aligned_to_cat_for_monophy_test,
     rbcl_aligned_for_monophy_test %>%
       filter(marker == "rbcl") %>%
-      group_by(dataset) %>%
+      group_by(taxon_sampling) %>%
       tar_group(),
     iteration = "group"
   ),
@@ -153,7 +153,7 @@ tar_plan(
     rbcl_aligned_to_cat_for_gap_test,
     rbcl_aligned_for_gap_test %>%
       filter(marker == "rbcl") %>%
-      group_by(dataset) %>%
+      group_by(taxon_sampling) %>%
       tar_group(),
     iteration = "group"
   ),
@@ -174,7 +174,7 @@ tar_plan(
       trnlf_aligned,
       rbcl_aligned_for_gap_test,
       rbcl_trnlf_aligned_for_gap_test) %>%
-      group_by(marker, dataset, family) %>%
+      group_by(marker, taxon_sampling, family) %>%
       tar_group(),
     iteration = "group"
   ),
@@ -200,7 +200,7 @@ tar_plan(
       rbcl_trnlf_aligned_for_monophy_test,
       trnlf_aligned
     ) %>%
-    group_by(marker, dataset) %>%
+    group_by(marker, taxon_sampling) %>%
     tar_group(),
     iteration = "group"
   ),
@@ -241,11 +241,11 @@ tar_plan(
   ),
 
   # BLAST test ----
-  dataset_names = c("all", "no_hybrid"),
+  taxon_sampling_names = c("all", "no_hybrid"),
   tar_target(
     rbcl_trnlf_pasted_seqs,
-    combine_rbcl_trnlf_seqs(seqs, dataset_select = dataset_names),
-    pattern = map(dataset_names)
+    combine_rbcl_trnlf_seqs(seqs, taxon_sampling_select = taxon_sampling_names),
+    pattern = map(taxon_sampling_names)
   ),
   # Select sequences (aligned or not doesn't matter) to test
   tar_target(
@@ -254,7 +254,7 @@ tar_plan(
       rbcl_trnlf_pasted_seqs,
       seqs,
     ) %>%
-    group_by(marker, dataset) %>%
+    group_by(marker, taxon_sampling) %>%
     tar_group(),
     iteration = "group"
   ),
@@ -301,7 +301,7 @@ tar_plan(
   tar_target(
     blast_res_raw_grouped,
     blast_res_raw %>%
-      group_by(marker, dataset) %>%
+      group_by(marker, taxon_sampling) %>%
       tar_group(),
     iteration = "group"
   ),
@@ -318,7 +318,7 @@ tar_plan(
   tar_target(
     cutoff_table_grouped,
     cutoff_table %>%
-      group_by(marker, dataset) %>%
+      group_by(marker, taxon_sampling) %>%
       tar_group(),
     iteration = "group"
   ),

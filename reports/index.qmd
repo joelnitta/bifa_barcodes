@@ -13,6 +13,7 @@ bibliography: references.yaml
 #| label: load
 targets::tar_load(
   c(
+    references, # re-knit if references change
     barcode_dist,
     monophyly_res,
     barcode_gap_res_raw,
@@ -32,8 +33,45 @@ library(glue)
 library(janitor)
 library(ggtext)
 library(ggtree)
-library(ggnewscale)
 ```
+
+```{r}
+#| label: dot-plot
+
+custom_labels <- setNames(
+  c("(a) Interspecific", "(b) Intraspecific"), c("inter", "intra"))
+
+plot <- barcode_gap_res_raw %>%
+  filter(marker %in% c("rbcl", "trnlf"), taxon_sampling == "all") %>%
+  select(marker, species, inter = min_inter_dist, intra = max_intra_dist) %>%
+  pivot_longer(names_to = "comp_type", -c(marker, species)) %>%
+  pivot_wider(names_from = marker, values_from = value) %>%
+  # filter(!if_any(everything(), is.na))
+  ggplot(aes(x = rbcl, y = trnlf)) +
+  geom_abline(
+    slope = 1, intercept = 0, linetype = "dashed", color = "red",
+    linewidth = 0.25) +
+  geom_point(alpha = 0.5, size = 0.5) +
+  # coord_fixed() +
+  labs(
+    x = "rbcL",
+    y = "trnL-F"
+  ) +
+  facet_wrap(
+    vars(comp_type), labeller = labeller(comp_type = custom_labels),
+    scales = "free") +
+  theme_bw() +
+  theme(
+     axis.title.x = element_text(face = "italic"),
+     axis.title.y = element_text(face = "italic")
+  )
+
+ggsave(
+  plot = plot,
+  file = here::here("results/reports/figure_2.pdf"),
+  width = 8, height = 4, units = "in")
+```
+
 
 ```{r}
 #| label: tree-plot
@@ -43,14 +81,14 @@ marker <- str_extract(alignment_files, "rbcl_trnlf|rbcl_short|trnlf|rbcl")
 taxon_sampling <- str_extract(alignment_files, "all|no_hybrid")
 
 tree_selection <- which(marker == "rbcl_trnlf" & taxon_sampling == "all")
-assertthat::assert_that(assertthat::is.number(tree_selection))
+invisible(assertthat::assert_that(assertthat::is.number(tree_selection)))
 
 tree_to_plot <- barcode_tree[[tree_selection]]
 
 # Root tree
 outgroup <- tree_to_plot$tip.label[
   str_detect(tree_to_plot$tip.label, "Zygnema")]
-assertthat::assert_that(assertthat::is.string(outgroup))
+invisible(assertthat::assert_that(assertthat::is.string(outgroup)))
 
 tree_to_plot <-
   phytools::reroot(
@@ -231,6 +269,13 @@ clade_cols <- clade_tibble %>%
   pull(color) %>%
   set_names(clade_tibble$major_clade)
 
+# Get outgroup taxa for plotting outgroup line
+og_taxa_sorted <- ggtree::fortify(tree_to_plot) %>%
+  left_join(taxonomy_summary, by = c(label = "tip")) %>%
+  filter(major_clade == "outgroup") %>%
+  arrange(x) %>%
+  pull(label)
+
 plot <- gheatmap(
     p = circ_tree, 
     data = tree_plot_data,
@@ -254,6 +299,13 @@ plot <- gheatmap(
       label = major_clade_letter,
       color = major_clade)
   ) +
+  geom_strip(
+    first(og_taxa_sorted),
+    last(og_taxa_sorted),
+    label = "Outgroup",
+    offset = 0.8,
+    offset.text = 0.2,
+    color = "black") +
   scale_color_manual(values = clade_cols) +
   theme(
     legend.title = element_blank(),
@@ -261,7 +313,7 @@ plot <- gheatmap(
 
 ggsave(
   plot = plot,
-  file = here::here("results/reports/figure_2.pdf"),
+  file = here::here("results/reports/figure_3.pdf"),
   width = 10.1, height = 10.1, units = "in")
 ```
 
@@ -277,11 +329,11 @@ n_species_mult_specimen <-
 # Barcode test results
 pretty_names <- tribble(
   ~dataset, ~dataset_pretty, ~order,
-  "all rbcl_short", "*rbcL* (short)", 1,
-  "all rbcl", "*rbcL*", 2,
-  "all trnlf", "*trnL-F*", 3,
-  "all rbcl_trnlf", "*rbcL* + *trnL-F*", 4,
-  "no_hybrid rbcl_short", "*rbcL* (short), no hybrids", 5,
+  "all rbcl_short", "*rbcL* short, all taxa", 1,
+  "all rbcl", "*rbcL*, all taxa", 2,
+  "all trnlf", "*trnL-F*, all taxa", 3,
+  "all rbcl_trnlf", "*rbcL* + *trnL-F*, all taxa", 4,
+  "no_hybrid rbcl_short", "*rbcL* short, no hybrids", 5,
   "no_hybrid rbcl", "*rbcL*, no hybrids", 6,
   "no_hybrid trnlf", "*trnL-F*, no hybrids", 7,
   "no_hybrid rbcl_trnlf", "*rbcL* + *trnL-F*, no hybrids", 8
@@ -346,7 +398,9 @@ barcode_res_long <-
   left_join(pretty_names, by = "dataset") %>%
   mutate(dataset = dataset_pretty) %>%
   select(-dataset_pretty) %>%
-  mutate(test = str_replace_all(test, "blast", "BLAST"))
+  mutate(
+    test = str_replace_all(test, "blast", "BLAST"),
+    dataset = str_replace_all(dataset, "\\(short\\)", "short"))
 
 get_blast_res <- function(glue_text, ...) {
   barcode_res_long %>%
@@ -363,18 +417,15 @@ get_blast_res <- function(glue_text, ...) {
 We used three methods to evaluate the utility of the DNA barcodes for species identification: barcode gap test, tree (monophyly) test, and BLAST test.
 Any specimens not identified to species were excluded from analysis.
 For the gap test, we first aligned all specimens within each family using MAFFT [@Katoh2002].
-Classification followed PPG I, with updates for some recently published or revised genera; families with fewer than two samples excluded from analysis. 
+Classification followed PPG I, with updates for some recently published or revised genera; families with fewer than two samples excluded from the gap test. 
 We then calculated pairwise distances between all specimens within each family using Kimura’s two-parameter algorithm [K2P\; @Kimura1979].
 Any species with one or more maximum intraspecific distances that exceeded the minimum interspecific distance was considered a failure.
-For the tree test, we first aligned the DNA sequences with MAFFT. 
-The *trnL-F* region includes intergeneic spacers and its evolutionary rate is too high to reliably align it across all species in our study, which spans all ferns, so we first conducted alignment within each family, then merged the family-level alignments into a single alignment using the MAFFT `--merge` argument [@Nitta2022b].
-We then inferred a maximum-likelihood phylogeny using IQTREE [@Nguyen2015].
-Outgroup sequences were the same as those used in @Nitta2022b.
-We assessed the monophyly of each species using the MonoPhy R package [@Schwery2016].
+For the tree test, we merged the family-level *trnL-F* alignments into a single alignment using the MAFFT `--merge` argument, and aligned *rbcL* with the same outgroups as those used in @Nitta2022b.
+We then inferred a maximum-likelihood phylogeny using IQTREE [@Nguyen2015] and assessed the monophyly of each species using the 'MonoPhy' R package [@Schwery2016].
 Any species that was not monophyletic was counted as a failure.
 For the BLAST test, we first created a BLAST database for each marker.
 Next, we queried each sequence in turn against the database using the BLAST-n algorithm [@Altschul1997; @Camacho2009].
-We calculated the mean intraspecific percent identity (pident) from the BLAST results and used this as the species level cutoff value.
+We calculated the mean intraspecific percent identity (pident) from the BLAST results of taxa not belonging to species complexes or hybrids and used this as the species level cutoff value.
 Finally, we categorized any BLAST hit where the query sequenced matched a sequence from a different species above the cutoff value for at least 95% of the query sequence length as a failure.
 Note that the gap test and tree test can only be used for species that include multiple specimens in our sampling.
 
@@ -388,18 +439,22 @@ Rates of successful species identification ranged from `r get_blast_res("{percen
 The gap test failed to find a barcode gap in many species, in agreement with a study on ferns from Oaxaca, Mexico [@Trujillo-Argueta2021].
 One study from Europe reported a consistent barcode gap across species, but this is likely due to their much smaller sample size [24 species with multiple specimens vs. `r n_species_mult_specimen` in the current study\; @DeGroot2011a].
 *trnL-F* had higher successful species identification rates than *rbcL* in the BLAST test, but not the gap test (Table 1).
-*trnL-F* has greater interspecific and intraspecific variation relative to *rbcl* because the former is a non-coding spacer region, whereas the latter is a protein-coding gene.
+*trnL-F* has greater interspecific and intraspecific variation relative to *rbcl* because the former is a non-coding spacer region, whereas the latter is a protein-coding gene (Fig. 2).
 *trnL-F* has been previously shown in studies including smaller sampling of ferns to have higher species identification rates than *rbcL* [@Li2011; @Chen2013a].
 However, *rbcL* is useful as a phylogenetic marker at deeper divergence levels due to its slower rate of evolution, and is the most-frequently sequenced plastid region in ferns [@Nitta2022b] as well as a core DNA barcoding marker in land plants [@Group2008].
-We therefore recommend both regions be used for fern DNA barcoding projects, which can serve to both identify species and expand the phylogenetic sampling of the fern tree of life.
-Analyses using the shorter region of *rbcL* obtained by the MiSeq platform did not show a substantial decrease in species identification rates (Table 1).
+We therefore recommend both regions be used for fern DNA barcoding projects, which can serve to both identify species and expand the phylogenetic sampling of the fern tree of life; futhermore, combining the two regions produced the best results in the BLAST and tree tests (but not the gap test).
+Analyses using the shorter region of *rbcL* obtained by the MiSeq platform did not show a substantial decrease in species identification rates in the gap or tree tests, and only a ca. 4% decrease in the BLAST test (Table 1).
 Therefore, massively parallel sequencing of *rbcL* is a promising approach for building barcode libraries.
 
 A marked improvement in species identification rates was observed in datasets with hybrid taxa and species complexes removed, similar to a study in Japan [Table 1\; @Ebihara2010].
-Furthermore, many species complexes and hybrid taxa could not be successfully identified regardless of the test employed (Fig. 2).
+Furthermore, many species complexes and hybrid taxa could not be successfully identified regardless of the test employed (Fig. 3).
 The difficulty of molecularly identifying such taxa is due to the fact that the plastid genome is non-recombining and maternally inherited in ferns [hence, hybrid taxa share identical plastid sequences with their mother\; @Gastony1992; @Vogel1998; @Kuo2018a].
 As ferns have a generally high frequency of hybridization [@Barrington1989], this problem is expected to occur in any DNA barcoding study of ferns with a sufficiently dense sampling that relies on plastid markers.
 While our study demonstrates that plastid markers can be used to successfully identify species in the majority of cases, there will be some taxa that require additional investigation using, e.g., nuclear markers and/or genome-wide approaches.
+
+## Code Availability
+
+The pipeline for technical validation was designed using the 'targets' R package [@Landau2021] and is available from <https://github.com/joelnitta/bifa_barcodes>. A Docker image to run the code is available from <https://hub.docker.com/r/joelnitta/bifa_barcodes>.
 
 ## Tables
 
@@ -412,11 +467,18 @@ barcoding_res_table
 
 ## Figures
 
-**Fig. 2.** Maximum-likelihood *rbcL* + *trnL-F* phylogeny overlaid with results of the DNA barcode tests and hybrid status from the *rbcL* + *trnL-F* dataset.
-Orange indicates hybrid taxa and/or taxa belonging to species complexes.
-Blue indicates taxa (generally, species) that could be successfully identified.
-Red indicates taxa that could not be successfully identified (failures).
+**Fig. 2.** Comparison of genetic (K2P) distances between *rbcL* and *trnL-F*, datasets including all taxa.
+(**a**) maximum intraspecific distances.
+(**b**) minimum interspecific distances.
+Red dashed line shows 1:1 correspondence.
+Each point is one species pair (interspecific distances) or pair of sequences within a species (intraspecific distances).
+
+**Fig. 3.** Maximum-likelihood *rbcL* + *trnL-F* phylogeny overlaid with hybrid status and results of the DNA barcode tests from the *rbcL* + *trnL-F* dataset.
+Colors of outermost ring indicate major fern clades (order or suborder) with sampling of more than one species in the dataset, letters next to rings are two-letter abbreviation of major clade.
+Orange (innermost ring) indicates hybrid taxa and/or taxa belonging to species complexes.
+Middle rings indicate bacode test results: blue indicates taxa (generally, species) that could be successfully identified; red indicates taxa that could not be successfully identified (failures).
 Three barcode tests were used: the gap test, the tree (monophyly) test, and the BLAST test.
 Any taxon with a specimen that failed at least one test is counted as a failure.
 For the gap test and tree test, only species with multiple specimens were analyzed.
+Tree visualization generated with the 'ggtree' R package [@yuGgtreePackageVisualization2017].
 For details about each test, see Methods and Technical Validation.

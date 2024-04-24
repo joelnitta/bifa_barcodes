@@ -1019,15 +1019,39 @@ get_species_cutoff <- function(blast_res) {
     )
 }
 
+
+#' Choose a species-level cutoff value for BLAST barcode test
+#'
+#' Also groups the dataframe for looping in the targets pipeline
+#'
+#' @param cutoff_table Dataframe; tibble with potential cutoff values to use
+#' (including mean and minimum interspecific identities).
+#'
+#' @return Dataframe with single cutoff value selected for each combination of
+#' marker and taxon sampling
+select_and_group_cutoff <- function(cutoff_table) {
+  cutoff_select <-
+    cutoff_table %>%
+    filter(taxon_sampling == "no_hybrid", cutoff_type == "mean_pident") %>%
+    select(marker, taxon_sampling, cutoff_use = value)
+
+  # Use the mean pident from the no-hybrids taxon sampling for each marker
+  cutoff_select %>%
+    bind_rows(
+      mutate(cutoff_select, taxon_sampling = "all")
+    ) %>%
+    group_by(marker, taxon_sampling) %>%
+    targets::tar_group()
+}
+
 test_blast <- function(
   blast_res,
-  cutoff_table, cutoff_type_select = "mean") {
+  cutoff_table) {
 
   # Obtain value to use for infraspecific cutoff
   intra_cutoff <-
     cutoff_table %>%
-    filter(str_detect(cutoff_type, cutoff_type_select)) %>%
-    pull(value)
+    pull(cutoff_use)
 
   assertthat::assert_that(assertthat::is.number(intra_cutoff))
 

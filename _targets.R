@@ -247,7 +247,7 @@ tar_plan(
     combine_rbcl_trnlf_seqs(seqs, taxon_sampling_select = taxon_sampling_names),
     pattern = map(taxon_sampling_names)
   ),
-  # Select sequences (aligned or not doesn't matter) to test
+  # Select sequences to test
   tar_target(
     seqs_for_blast_test,
     bind_rows(
@@ -310,6 +310,7 @@ tar_plan(
     prep_blast_res(blast_res_raw_grouped, seqs_for_blast_test),
     pattern = map(blast_res_raw_grouped, seqs_for_blast_test)
   ),
+  # Determine marker-specific species level cutoffs
   tar_target(
     cutoff_table,
     get_species_cutoff(blast_res),
@@ -317,9 +318,7 @@ tar_plan(
   ),
   tar_target(
     cutoff_table_grouped,
-    cutoff_table %>%
-      group_by(marker, taxon_sampling) %>%
-      tar_group(),
+    select_and_group_cutoff(cutoff_table),
     iteration = "group"
   ),
   tar_target(
@@ -332,6 +331,10 @@ tar_plan(
   ),
   blast_fail_rate_summary = summarize_blast_fail_rate(blast_test_res_raw),
   # Write report ----
+  tar_file(
+    references,
+    "reports/references.yaml"
+  ),
   tarchetypes::tar_quarto(
     report,
     quiet = FALSE

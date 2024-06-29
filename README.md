@@ -6,13 +6,18 @@ There are two options (Docker images) provided to run the code: either [run ever
 
 ## Docker image to run the analysis from scratch
 
+First, clone this GitHub repo then enter it:
+
+```
+git clone https://github.com/joelnitta/bifa_barcodes
+cd bifa_barcodes
+```
+
 To run the analysis pipeline, do:
 
 ```
 docker run --rm -dt -v ${PWD}:/wd -w /wd joelnitta/bifa_barcodes:latest Rscript -e "targets::tar_make()"
 ```
-
-The Docker image `joelnitta/bifa_barcodes:latest` used for analysis is automatically built and pushed to Docker Hub via a [Github Workflow](.github/workflows/docker.yaml) .
 
 ### Interacting with the Docker container while it runs
 

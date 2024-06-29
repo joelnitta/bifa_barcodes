@@ -2,17 +2,17 @@
 
 Code repository for ["Improving knowledge of Asian pteridophytes through DNA sampling of specimens in regional collections" project](https://www.gbif.org/project/BIFA6_010/improving-knowledge-of-asian-pteridophytes-through-dna-sampling-of-specimens-in-regional-collections)
 
-## Docker image for analysis
+There are two options (Docker images) provided to run the code: either [run everything from scratch](#docker-image-to-run-the-analysis-from-scratch), or launch an RStudio session with the [already completed workflow](#docker-image-with-completed-analysis).
 
-The Docker image `joelnitta/bifa_barcodes:latest` used for analysis is automatically built and pushed to Docker Hub via a [Github Workflow](.github/workflows/docker.yaml) .
+## Docker image to run the analysis from scratch
 
-### Running the analysis
-
-To run the analysis pipeline (requires Docker), do:
+To run the analysis pipeline, do:
 
 ```
 docker run --rm -dt -v ${PWD}:/wd -w /wd joelnitta/bifa_barcodes:latest Rscript -e "targets::tar_make()"
 ```
+
+The Docker image `joelnitta/bifa_barcodes:latest` used for analysis is automatically built and pushed to Docker Hub via a [Github Workflow](.github/workflows/docker.yaml) .
 
 ### Interacting with the Docker container while it runs
 

@@ -155,6 +155,31 @@ RUN Rscript -e 'pkg_ignore <- c("jsonlite", "rlang", "languageserver", "reprex",
 ### Install completed analysis ####
 ###################################
 
-COPY ./_targets _targets
+# copy folders
 
-COPY ./data_raw data_raw
+COPY _targets /home/rstudio/_targets/
+
+COPY data_raw /home/rstudio/data_raw/
+
+COPY R /home/rstudio/R/
+
+COPY renv /home/rstudio/renv/
+
+COPY reports /home/rstudio/reports/
+
+COPY results /home/rstudio/results/
+# copy files
+
+COPY _quarto.yml \
+  _targets.R \
+  .gitignore \
+  .Rprofile \
+  Dockerfile \
+  Dockerfile.demo \
+  README.md \
+  renv.lock \
+  /home/rstudio/
+
+RUN chown -R rstudio:rstudio /home/rstudio
+
+WORKDIR /home/rstudio

@@ -147,6 +147,23 @@
       ],
       "Hash": "cfd2dcf74bf57d961f1bb65f75357a08"
     },
+    "Polychrome": {
+      "Package": "Polychrome",
+      "Version": "1.5.1",
+      "Source": "Repository",
+      "Repository": "CRAN",
+      "Requirements": [
+        "R",
+        "colorspace",
+        "grDevices",
+        "graphics",
+        "methods",
+        "scatterplot3d",
+        "stats",
+        "utils"
+      ],
+      "Hash": "466f3a16617d769c773ca1f1ea878055"
+    },
     "R6": {
       "Package": "R6",
       "Version": "2.5.1",

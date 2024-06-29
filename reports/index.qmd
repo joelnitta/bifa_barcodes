@@ -7,6 +7,8 @@ execute:
   warning: false
   output: true
 bibliography: references.yaml
+editor_options: 
+  chunk_output_type: console
 ---
 
 ```{r}

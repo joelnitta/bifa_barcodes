@@ -47,6 +47,8 @@ tar_plan(
     read_csv(!!.x)
   ),
   # - Drop specimens not identified to species
+  seqs_all_with_indets = seqs_raw %>%
+    mutate(taxon_sampling = "all_with_indet"),
   seqs_all = drop_indets(seqs_raw) %>%
     mutate(taxon_sampling = "all"),
   # - Also drop species complexes and hybrids
@@ -56,7 +58,7 @@ tar_plan(
     sp_complex
   ) %>% mutate(taxon_sampling = "no_hybrid"),
   # - Final unaligned sequences
-  seqs = bind_rows(seqs_all, seqs_no_hybrid) %>%
+  seqs = bind_rows(seqs_all_with_indets, seqs_all, seqs_no_hybrid) %>%
     assert(not_na, everything()),
 
   # DNA alignment ---
